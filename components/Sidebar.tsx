@@ -45,16 +45,6 @@ const INITIAL_CONVERSATIONS: ConversationRecord[] = [
 		title: 'Tailwind CSS 与 Styled Components 对比',
 		createdAt: '2026-03-28T14:15:00',
 	},
-	{
-		key: 'conv-3',
-		title: 'React Server Components 入门',
-		createdAt: '2026-03-20T10:30:00',
-	},
-	{
-		key: 'conv-4',
-		title: '大模型推理性能优化策略',
-		createdAt: '2026-03-18T16:20:00',
-	},
 ];
 
 function formatConversationTime(isoString: string) {
