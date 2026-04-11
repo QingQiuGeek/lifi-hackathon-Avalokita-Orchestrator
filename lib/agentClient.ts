@@ -4,7 +4,7 @@
  */
 
 import { LanguageModel } from 'ai';
-import { openai } from '@ai-sdk/openai';
+import { createOpenAI, openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
 import type { AgentModelConfig, SupportedModel } from './agentConfig';
 
@@ -19,6 +19,7 @@ export function getModelFromConfig(config: AgentModelConfig): LanguageModel {
 		zhipu: process.env.ZHIPU_API_KEY,
 		openai: process.env.OPENAI_API_KEY,
 		anthropic: process.env.ANTHROPIC_API_KEY,
+		qwen: process.env.QWEN_API_KEY,
 	};
 
 	const apiKey = apiKeys[provider];
@@ -33,6 +34,15 @@ export function getModelFromConfig(config: AgentModelConfig): LanguageModel {
 			return openai(model as any);
 		case 'anthropic':
 			return anthropic(model as any);
+		case 'qwen': {
+			const qwen = createOpenAI({
+				apiKey,
+				baseURL:
+					process.env.QWEN_BASE_URL ||
+					'https://dashscope.aliyuncs.com/compatible-mode/v1',
+			});
+			return qwen(model as any);
+		}
 		default:
 			// Fallback for deepseek and zhipu - use openai as default
 			console.warn(`${provider} not available, falling back to OpenAI`);

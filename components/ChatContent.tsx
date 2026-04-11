@@ -1,14 +1,10 @@
 'use client';
 
-import {
-	LinkOutlined,
-	RedoOutlined,
-	ShareAltOutlined,
-} from '@ant-design/icons';
+import { RedoOutlined, ShareAltOutlined } from '@ant-design/icons';
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Actions, Bubble, Think } from '@ant-design/x';
-import type { ActionsProps, BubbleItemType, SourcesProps } from '@ant-design/x';
+import type { ActionsProps, BubbleItemType } from '@ant-design/x';
 import { Avatar } from 'antd';
 import { useAccount } from 'wagmi';
 import { useConnectModal } from '@rainbow-me/rainbowkit';
@@ -37,6 +33,7 @@ type ChatMessage = {
 	key: string;
 	role: 'user' | 'ai' | 'system';
 	content: string;
+	reasoning?: string;
 	loading?: boolean;
 	streaming?: boolean;
 };
@@ -98,16 +95,11 @@ export default function ChatContent() {
 	const [thinking, setThinking] = useState(false);
 	const [generating, setGenerating] = useState(false);
 	const [currentAiKey, setCurrentAiKey] = useState<string | null>(null);
-	const [sourcesMap, setSourcesMap] = useState<
-		Record<string, SourcesProps['items']>
-	>({});
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const wasConnectedRef = useRef(Boolean(userAddress));
+	const streamAbortRef = useRef<AbortController | null>(null);
 	const conversationRef = useRef<HTMLDivElement | null>(null);
 	const pendingScrollRef = useRef(false);
-	const thinkTimeoutIdRef = useRef<number | null>(null);
-	const streamStepTimeoutIdRef = useRef<number | null>(null);
-	const streamFinalizeTimeoutIdRef = useRef<number | null>(null);
 	const messageIdRef = useRef(0);
 	const activeStreamTokenRef = useRef(0);
 	const hasUserMessageRef = useRef(false);
@@ -138,25 +130,13 @@ export default function ChatContent() {
 		[scrollToLatest],
 	);
 
-	const clearStreamTimers = useCallback(() => {
-		if (thinkTimeoutIdRef.current !== null) {
-			window.clearTimeout(thinkTimeoutIdRef.current);
-			thinkTimeoutIdRef.current = null;
-		}
-		if (streamStepTimeoutIdRef.current !== null) {
-			window.clearTimeout(streamStepTimeoutIdRef.current);
-			streamStepTimeoutIdRef.current = null;
-		}
-		if (streamFinalizeTimeoutIdRef.current !== null) {
-			window.clearTimeout(streamFinalizeTimeoutIdRef.current);
-			streamFinalizeTimeoutIdRef.current = null;
-		}
-	}, []);
-
 	const clearAllTimers = useCallback(() => {
 		activeStreamTokenRef.current += 1;
-		clearStreamTimers();
-	}, [clearStreamTimers]);
+		if (streamAbortRef.current) {
+			streamAbortRef.current.abort();
+			streamAbortRef.current = null;
+		}
+	}, []);
 
 	useEffect(() => {
 		return () => {
@@ -191,7 +171,6 @@ export default function ChatContent() {
 			setGenerating(false);
 			setCurrentAiKey(null);
 			setMessages([]);
-			setSourcesMap({});
 		};
 
 		window.addEventListener(
@@ -220,7 +199,6 @@ export default function ChatContent() {
 			setThinking(false);
 			setGenerating(false);
 			setCurrentAiKey(null);
-			setSourcesMap({});
 			setMessages(mockMessages);
 			pendingScrollRef.current = true;
 		};
@@ -237,38 +215,8 @@ export default function ChatContent() {
 		};
 	}, [clearAllTimers]);
 
-	const buildSourcesItems = useCallback(
-		(query: string): SourcesProps['items'] => {
-			const encoded = encodeURIComponent(query);
-			return [
-				{
-					key: 's-1',
-					title: 'Ant Design X 组件总览',
-					url: 'https://ant-design-x.antgroup.com/components/overview-cn',
-					icon: <LinkOutlined />,
-					description: '官方组件入口与能力清单',
-				},
-				{
-					key: 's-2',
-					title: 'Bubble 对话气泡',
-					url: 'https://ant-design-x.antgroup.com/components/bubble-cn',
-					icon: <LinkOutlined />,
-					description: '消息结构、流式传输、角色与插槽',
-				},
-				{
-					key: 's-3',
-					title: `搜索：${query}`,
-					url: `https://www.bing.com/search?q=${encoded}`,
-					icon: <LinkOutlined />,
-					description: '外部检索结果（示例来源）',
-				},
-			];
-		},
-		[],
-	);
-
 	const sendMessage = useCallback(
-		(raw: string) => {
+		async (raw: string) => {
 			const text = raw.trim();
 			if (!text) return;
 			if (!userAddress) {
@@ -293,95 +241,158 @@ export default function ChatContent() {
 			const streamToken = ++activeStreamTokenRef.current;
 			const userKey = `${USER_KEY_PREFIX}${timeId}`;
 			const aiKey = `${AI_KEY_PREFIX}${timeId}`;
-			const fullReply = `关于"${text}"，我建议先从需求拆分、组件职责边界、数据流和交互状态管理四个层面设计。需要的话我可以继续给你产出可直接落地的代码版本。`;
-			let streamFinished = false;
-
-			const finishStream = (content: string) => {
-				if (activeStreamTokenRef.current !== streamToken) return;
-				if (streamFinished) return;
-				streamFinished = true;
-				setThinking(false);
-				setGenerating(false);
-				setMessages((prev) =>
-					prev.map((item) =>
-						item.key === aiKey
-							? {
-									...item,
-									content,
-									streaming: false,
-								}
-							: item,
-					),
-				);
-				clearStreamTimers();
-			};
 
 			setValue('');
 			setThinking(true);
 			setGenerating(true);
 			setCurrentAiKey(aiKey);
-			setSourcesMap((prev) => ({
-				...prev,
-				[aiKey]: buildSourcesItems(text),
-			}));
-			// 先添加用户消息和 AI 占位消息（用于承载思考过程）
 			setMessages((prev) => [
 				...prev,
 				{ key: userKey, role: 'user', content: text },
-				{ key: aiKey, role: 'ai', content: '', streaming: true },
+				{ key: aiKey, role: 'ai', content: '', reasoning: '', streaming: true },
 			]);
 			scheduleScrollToLatest('auto');
 
-			streamFinalizeTimeoutIdRef.current = window.setTimeout(() => {
-				finishStream(fullReply);
-			}, 15000);
+			const abortController = new AbortController();
+			streamAbortRef.current = abortController;
 
-			const thinkTimeoutId = window.setTimeout(() => {
+			const applyChunk = (chunk: {
+				type: 'thinking' | 'response' | 'error' | 'done';
+				content?: string;
+			}) => {
 				if (activeStreamTokenRef.current !== streamToken) return;
-				if (streamFinished) return;
-				thinkTimeoutIdRef.current = null;
-				setThinking(false);
 
-				let index = 0;
-				const chunkSize = Math.max(1, Math.ceil(fullReply.length / 36));
-
-				const pushChunk = () => {
-					if (activeStreamTokenRef.current !== streamToken) return;
-					if (streamFinished) return;
-
-					index = Math.min(fullReply.length, index + chunkSize);
-					const nextContent = fullReply.slice(0, index);
-					const isDone = index >= fullReply.length;
-
-					setMessages((prev) =>
-						prev.map((item) =>
-							item.key === aiKey
-								? {
-										...item,
-										content: nextContent,
-										streaming: !isDone,
-									}
-								: item,
-						),
-					);
-					scheduleScrollToLatest('auto');
-
-					if (isDone) {
-						finishStream(fullReply);
+				switch (chunk.type) {
+					case 'thinking':
+						setThinking(true);
+						if (!chunk.content) return;
+						setMessages((prev) =>
+							prev.map((item) =>
+								item.key === aiKey
+									? {
+											...item,
+											reasoning: `${item.reasoning ?? ''}${chunk.content}`,
+										}
+									: item,
+							),
+						);
+						scheduleScrollToLatest('auto');
 						return;
+					case 'response':
+						setThinking(false);
+						if (!chunk.content) return;
+						setMessages((prev) =>
+							prev.map((item) =>
+								item.key === aiKey
+									? {
+											...item,
+											content: `${item.content}${chunk.content}`,
+										}
+									: item,
+							),
+						);
+						scheduleScrollToLatest('auto');
+						return;
+					case 'error':
+						setThinking(false);
+						setMessages((prev) =>
+							prev.map((item) =>
+								item.key === aiKey
+									? {
+											...item,
+											content:
+												item.content || chunk.content || '请求失败，请重试。',
+										}
+									: item,
+							),
+						);
+						return;
+					case 'done':
+						setThinking(false);
+						setGenerating(false);
+						setCurrentAiKey(null);
+						setMessages((prev) =>
+							prev.map((item) =>
+								item.key === aiKey
+									? {
+											...item,
+											streaming: false,
+										}
+									: item,
+							),
+						);
+						return;
+				}
+			};
+
+			try {
+				const response = await fetch('/api/agents', {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+					},
+					body: JSON.stringify({
+						message: text,
+						userAddress,
+						chainId: 8453,
+					}),
+					signal: abortController.signal,
+				});
+
+				if (!response.ok || !response.body) {
+					throw new Error(`请求失败（${response.status}）`);
+				}
+
+				const reader = response.body.getReader();
+				const decoder = new TextDecoder();
+				let buffer = '';
+
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) break;
+
+					buffer += decoder.decode(value, { stream: true });
+					const events = buffer.split('\n\n');
+					buffer = events.pop() ?? '';
+
+					for (const event of events) {
+						const dataLine = event
+							.split('\n')
+							.find((line) => line.startsWith('data: '));
+						if (!dataLine) continue;
+
+						const payload = JSON.parse(dataLine.slice(6));
+						applyChunk(payload);
 					}
-
-					streamStepTimeoutIdRef.current = window.setTimeout(pushChunk, 34);
-				};
-
-				pushChunk();
-			}, 650);
-			thinkTimeoutIdRef.current = thinkTimeoutId;
+				}
+			} catch (error) {
+				if (abortController.signal.aborted) {
+					return;
+				}
+				const errorMsg =
+					error instanceof Error ? error.message : '请求失败，请稍后再试。';
+				applyChunk({ type: 'error', content: errorMsg });
+			} finally {
+				if (streamAbortRef.current === abortController) {
+					streamAbortRef.current = null;
+				}
+				setGenerating(false);
+				setThinking(false);
+				setCurrentAiKey(null);
+				setMessages((prev) =>
+					prev.map((item) =>
+						item.key === aiKey
+							? {
+									...item,
+									streaming: false,
+								}
+							: item,
+					),
+				);
+			}
 		},
 		[
-			buildSourcesItems,
 			clearAllTimers,
-			clearStreamTimers,
 			generating,
 			openConnectModal,
 			scheduleScrollToLatest,
@@ -472,6 +483,7 @@ export default function ChatContent() {
 				const isCurrentAiMessage = String(data.key) === currentAiKey;
 				const isStreaming = Boolean(data.streaming);
 				const isAiMessage = String(data.key).startsWith(AI_KEY_PREFIX);
+				const reasoningText = String((data as ChatMessage).reasoning ?? '');
 
 				return {
 					placement: 'start' as const,
@@ -493,11 +505,23 @@ export default function ChatContent() {
 					),
 					header: isAiMessage ? (
 						<Think
-							title={isCurrentAiMessage && thinking ? '思考中' : '思考完成'}
+							title={
+								isCurrentAiMessage && thinking
+									? '思考中'
+									: reasoningText
+										? '思考完成'
+										: '思考中'
+							}
 							loading={isCurrentAiMessage && thinking}
 							defaultExpanded={false}
 							style={{ marginBottom: 8 }}
-						></Think>
+						>
+							{reasoningText ? (
+								<div className='whitespace-pre-wrap text-xs leading-5'>
+									{reasoningText}
+								</div>
+							) : undefined}
+						</Think>
 					) : undefined,
 					footer:
 						isAiMessage && String(data.content ?? '') && !isStreaming ? (
@@ -513,7 +537,7 @@ export default function ChatContent() {
 			user: { placement: 'end' as const, variant: 'filled' as const },
 			system: { variant: 'borderless' as const },
 		}),
-		[createAiActions, currentAiKey, sourcesMap, thinking],
+		[createAiActions, currentAiKey, thinking],
 	);
 
 	const handleCancel = useCallback(() => {

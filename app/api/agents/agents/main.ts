@@ -6,7 +6,7 @@
 import { generateText } from 'ai';
 import { getAgentConfig } from '@/lib/agentConfig';
 import { getModelFromConfig } from '@/lib/agentClient';
-import { earningAgent } from './earning';
+import { earningAgent, earningAgentStream } from './earning';
 
 interface MainAgentInput {
 	userMessage: string;
@@ -19,6 +19,16 @@ interface MainAgentOutput {
 	chainId: number;
 	response: string;
 }
+
+export type MainAgentStreamChunk =
+	| { type: 'thinking'; content: string }
+	| { type: 'response'; content: string }
+	| { type: 'error'; content: string }
+	| {
+			type: 'done';
+			intent: 'earn' | 'bridge' | 'monitor' | 'unknown';
+			chainId: number;
+	  };
 
 export async function mainAgent(
 	input: MainAgentInput,
@@ -115,5 +125,106 @@ export async function mainAgent(
 		intent: recognizedIntent as 'earn' | 'bridge' | 'monitor' | 'unknown',
 		chainId: recognizedChainId,
 		response,
+	};
+}
+
+export async function* mainAgentStream(
+	input: MainAgentInput,
+): AsyncGenerator<MainAgentStreamChunk> {
+	const { userMessage, userAddress, chainId = 8453 } = input;
+
+	const intentConfig = getAgentConfig('main');
+	const intentModel = getModelFromConfig(intentConfig);
+
+	const intentSystemPrompt = `你是一个智能的意图识别器（Intent Router）。
+你需要理解用户在 DeFi 收益和跨链转账中的真实意图。
+
+可能的意图包括：
+1. earn - 用户想要存入资产到收益 vault，赚取收益
+2. bridge - 用户想要跨链转账
+3. monitor - 用户想查询仓位、收益、账户状态
+4. unknown - 无法识别的请求
+
+严格返回 JSON：
+{
+  "intent": "earn|bridge|monitor|unknown",
+  "chainId": 8453,
+  "confidence": 0.95
+}`;
+
+	const intentPrompt = `用户消息："${userMessage}"\n\n请识别意图并返回 JSON。`;
+
+	let recognizedIntent: 'earn' | 'bridge' | 'monitor' | 'unknown' = 'unknown';
+	let recognizedChainId = chainId;
+
+	try {
+		const intentResult = await generateText({
+			model: intentModel,
+			system: intentSystemPrompt,
+			prompt: intentPrompt,
+			temperature: 0.3,
+			maxTokens: 200,
+		});
+
+		const jsonMatch = intentResult.text.match(/\{[\s\S]*\}/);
+		if (jsonMatch) {
+			const parsed = JSON.parse(jsonMatch[0]);
+			recognizedIntent =
+				(parsed.intent as 'earn' | 'bridge' | 'monitor' | 'unknown') ||
+				'unknown';
+			recognizedChainId = parsed.chainId || chainId;
+		}
+	} catch {
+		yield { type: 'thinking', content: '意图识别失败，按通用模式处理。\n' };
+	}
+
+	yield {
+		type: 'thinking',
+		content: `Intent: ${recognizedIntent} | Chain: ${recognizedChainId}\n`,
+	};
+
+	try {
+		switch (recognizedIntent) {
+			case 'earn':
+				for await (const chunk of earningAgentStream({
+					userMessage,
+					userAddress,
+					chainId: recognizedChainId,
+				})) {
+					yield chunk;
+				}
+				break;
+			case 'bridge':
+				yield {
+					type: 'response',
+					content:
+						'🌉 Bridge Agent (即将推出)\n\n你想要跨链转账。目前我们的 Bridge Agent 还在开发中，预计 Phase 2 上线。',
+				};
+				break;
+			case 'monitor':
+				yield {
+					type: 'response',
+					content:
+						'📊 Monitor Agent (即将推出)\n\n你想查询仓位或收益。Monitor Agent 会在 Phase 3 上线。',
+				};
+				break;
+			case 'unknown':
+			default:
+				yield {
+					type: 'response',
+					content:
+						'我没有完全理解你的意思。你可以尝试：\n1) Earn: 我想在 Base 存 500 USDC 最高收益\n2) Bridge: 把 USDC 从 Ethereum 转到 Base',
+				};
+				break;
+		}
+	} catch (error) {
+		const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+		yield { type: 'error', content: `处理请求时出错：${errorMsg}` };
+	}
+
+	yield {
+		type: 'done',
+		intent: recognizedIntent,
+		chainId: recognizedChainId,
 	};
 }

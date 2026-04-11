@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { mainAgent } from './agents/main';
+import { mainAgentStream } from './agents/main';
 
 export const runtime = 'nodejs';
 
@@ -24,20 +24,40 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
-		// 调用主 Agent
-		const result = await mainAgent({
-			userMessage: message,
-			userAddress,
-			chainId: chainId || 8453, // 默认 Base
+		const encoder = new TextEncoder();
+
+		const stream = new ReadableStream({
+			start: async (controller) => {
+				const send = (payload: unknown) => {
+					controller.enqueue(
+						encoder.encode(`data: ${JSON.stringify(payload)}\n\n`),
+					);
+				};
+
+				try {
+					for await (const chunk of mainAgentStream({
+						userMessage: message,
+						userAddress,
+						chainId: chainId || 8453,
+					})) {
+						send(chunk);
+					}
+				} catch (error) {
+					const errorMsg =
+						error instanceof Error ? error.message : 'Unknown error';
+					send({ type: 'error', content: errorMsg });
+				} finally {
+					controller.close();
+				}
+			},
 		});
 
-		return NextResponse.json({
-			success: true,
-			data: {
-				intent: result.intent,
-				chainId: result.chainId,
-				response: result.response,
-				timestamp: new Date().toISOString(),
+		return new Response(stream, {
+			headers: {
+				'Content-Type': 'text/event-stream; charset=utf-8',
+				'Cache-Control': 'no-cache, no-transform',
+				Connection: 'keep-alive',
+				'X-Accel-Buffering': 'no',
 			},
 		});
 	} catch (error) {

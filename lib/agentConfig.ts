@@ -3,7 +3,12 @@
  * 每个 Agent 可以使用不同的模型（通过环境变量控制）
  */
 
-export type SupportedModel = 'deepseek' | 'zhipu' | 'openai' | 'anthropic';
+export type SupportedModel =
+	| 'deepseek'
+	| 'zhipu'
+	| 'openai'
+	| 'anthropic'
+	| 'qwen';
 
 export interface AgentModelConfig {
 	name: string;
@@ -99,6 +104,7 @@ function parseModelString(
 	if (modelString.startsWith('gpt-')) provider = 'openai';
 	else if (modelString.includes('glm')) provider = 'zhipu';
 	else if (modelString.startsWith('claude')) provider = 'anthropic';
+	else if (modelString.startsWith('qwen')) provider = 'qwen';
 	else if (modelString.startsWith('deepseek')) provider = 'deepseek';
 
 	return {
@@ -117,6 +123,7 @@ export function validateApiKey(provider: SupportedModel): boolean {
 		zhipu: 'ZHIPU_API_KEY',
 		openai: 'OPENAI_API_KEY',
 		anthropic: 'ANTHROPIC_API_KEY',
+		qwen: 'QWEN_API_KEY',
 	};
 
 	return !!process.env[keyMap[provider]];
