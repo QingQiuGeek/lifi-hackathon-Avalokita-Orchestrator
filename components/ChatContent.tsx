@@ -7,18 +7,11 @@ import {
 } from '@ant-design/icons';
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Actions, Bubble, Sources, Think } from '@ant-design/x';
+import { Actions, Bubble, Think } from '@ant-design/x';
 import type { ActionsProps, BubbleItemType, SourcesProps } from '@ant-design/x';
 import { Avatar } from 'antd';
 import { useAccount } from 'wagmi';
-import {
-	Modal,
-	ModalBackdrop,
-	ModalBody,
-	ModalContainer,
-	ModalDialog,
-	ModalHeader,
-} from '@heroui/react';
+import { useConnectModal } from '@rainbow-me/rainbowkit';
 import favicon from '../app/favicon.ico';
 
 import {
@@ -29,7 +22,6 @@ import {
 	type SidebarNewConversationDetail,
 } from './chatEvents';
 import Prompt from './Prompt';
-import { WalletButton } from './WalletConnect';
 
 const ChatSender = dynamic(() => import('./ChatSender'), {
 	ssr: false,
@@ -101,6 +93,7 @@ const MOCK_CONVERSATION_MESSAGES: Record<string, ChatMessage[]> = {
 
 export default function ChatContent() {
 	const { address: userAddress } = useAccount();
+	const { openConnectModal } = useConnectModal();
 	const [value, setValue] = useState('');
 	const [thinking, setThinking] = useState(false);
 	const [generating, setGenerating] = useState(false);
@@ -108,9 +101,8 @@ export default function ChatContent() {
 	const [sourcesMap, setSourcesMap] = useState<
 		Record<string, SourcesProps['items']>
 	>({});
-	const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
-	const [hadAddress, setHadAddress] = useState(!!userAddress);
+	const wasConnectedRef = useRef(Boolean(userAddress));
 	const conversationRef = useRef<HTMLDivElement | null>(null);
 	const pendingScrollRef = useRef(false);
 	const thinkTimeoutIdRef = useRef<number | null>(null);
@@ -176,15 +168,17 @@ export default function ChatContent() {
 		hasUserMessageRef.current = messages.some((m) => m.role === 'user');
 	}, [messages]);
 
+	// 处理钱包断开连接：刷新页面回到首页
 	useEffect(() => {
 		if (userAddress) {
-			setIsWalletModalOpen(false);
-			setHadAddress(true);
-		} else if (hadAddress && !userAddress) {
-			// 钱包已断开连接，刷新页面并重定向到首页
+			wasConnectedRef.current = true;
+			return;
+		}
+
+		if (wasConnectedRef.current) {
 			window.location.href = '/';
 		}
-	}, [userAddress, hadAddress]);
+	}, [userAddress]);
 
 	useEffect(() => {
 		const handleNewConversation = (event: Event) => {
@@ -278,7 +272,7 @@ export default function ChatContent() {
 			const text = raw.trim();
 			if (!text) return;
 			if (!userAddress) {
-				setIsWalletModalOpen(true);
+				openConnectModal?.();
 				return;
 			}
 			if (generating) return;
@@ -389,6 +383,7 @@ export default function ChatContent() {
 			clearAllTimers,
 			clearStreamTimers,
 			generating,
+			openConnectModal,
 			scheduleScrollToLatest,
 			userAddress,
 		],
@@ -580,57 +575,6 @@ export default function ChatContent() {
 					onCancelAction={handleCancel}
 				/>
 			</div>
-
-			<Modal
-				isOpen={isWalletModalOpen}
-				onOpenChange={setIsWalletModalOpen}
-			>
-				<ModalBackdrop>
-					<ModalContainer
-						placement='center'
-						size='sm'
-					>
-						<ModalDialog>
-							<ModalHeader className='text-[var(--app-text)]'>
-								🤓Please Connect Your Wallet
-							</ModalHeader>
-							<ModalBody className='pb-5'>
-								<p className='text-sm text-[var(--app-muted)]'>
-									Connect your wallet to access LI.FI yield strategies, bridge
-									solutions, and asset allocation recommendations🎊.
-								</p>
-								<div className='pt-6 flex justify-center'>
-									<style>{`
-										.wallet-connect-button button {
-											background-color: #3b82f6 !important;
-											color: white !important;
-											border: none !important;
-											padding: 8px 32px !important;
-											border-radius: 8px !important;
-											font-weight: 550 !important;
-											font-size: 16px !important;
-											cursor: pointer !important;
-											transition: all 0.2s ease !important;
-											box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3) !important;
-										}
-										.wallet-connect-button button:hover {
-											background-color: #2563eb !important;
-											box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4) !important;
-											transform: translateY(-1px) !important;
-										}
-										.wallet-connect-button button:active {
-											transform: translateY(0) !important;
-										}
-									`}</style>
-									<div className='wallet-connect-button'>
-										<WalletButton />
-									</div>
-								</div>
-							</ModalBody>
-						</ModalDialog>
-					</ModalContainer>
-				</ModalBackdrop>
-			</Modal>
 		</div>
 	);
 }
