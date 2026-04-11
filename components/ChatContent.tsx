@@ -7,14 +7,18 @@ import {
 } from '@ant-design/icons';
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Actions, Bubble, Sources, Think, ThoughtChain } from '@ant-design/x';
-import type {
-	ActionsProps,
-	BubbleItemType,
-	SourcesProps,
-	ThoughtChainItemType,
-} from '@ant-design/x';
+import { Actions, Bubble, Sources, Think } from '@ant-design/x';
+import type { ActionsProps, BubbleItemType, SourcesProps } from '@ant-design/x';
 import { Avatar } from 'antd';
+import { useAccount } from 'wagmi';
+import {
+	Modal,
+	ModalBackdrop,
+	ModalBody,
+	ModalContainer,
+	ModalDialog,
+	ModalHeader,
+} from '@heroui/react';
 import favicon from '../app/favicon.ico';
 
 import {
@@ -25,6 +29,7 @@ import {
 	type SidebarNewConversationDetail,
 } from './chatEvents';
 import Prompt from './Prompt';
+import { WalletButton } from './WalletConnect';
 
 const ChatSender = dynamic(() => import('./ChatSender'), {
 	ssr: false,
@@ -95,6 +100,7 @@ const MOCK_CONVERSATION_MESSAGES: Record<string, ChatMessage[]> = {
 };
 
 export default function ChatContent() {
+	const { address: userAddress } = useAccount();
 	const [value, setValue] = useState('');
 	const [thinking, setThinking] = useState(false);
 	const [generating, setGenerating] = useState(false);
@@ -102,7 +108,9 @@ export default function ChatContent() {
 	const [sourcesMap, setSourcesMap] = useState<
 		Record<string, SourcesProps['items']>
 	>({});
+	const [isWalletModalOpen, setIsWalletModalOpen] = useState(false);
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
+	const [hadAddress, setHadAddress] = useState(!!userAddress);
 	const conversationRef = useRef<HTMLDivElement | null>(null);
 	const pendingScrollRef = useRef(false);
 	const thinkTimeoutIdRef = useRef<number | null>(null);
@@ -169,6 +177,16 @@ export default function ChatContent() {
 	}, [messages]);
 
 	useEffect(() => {
+		if (userAddress) {
+			setIsWalletModalOpen(false);
+			setHadAddress(true);
+		} else if (hadAddress && !userAddress) {
+			// 钱包已断开连接，刷新页面并重定向到首页
+			window.location.href = '/';
+		}
+	}, [userAddress, hadAddress]);
+
+	useEffect(() => {
 		const handleNewConversation = (event: Event) => {
 			const customEvent = event as CustomEvent<SidebarNewConversationDetail>;
 			if (!customEvent.detail?.key) return;
@@ -225,70 +243,6 @@ export default function ChatContent() {
 		};
 	}, [clearAllTimers]);
 
-	const thoughtChainItems = useMemo<ThoughtChainItemType[]>(
-		() => [
-			{
-				key: 'tc-1',
-				title: '意图识别',
-				description: '解析用户输入并识别任务目标',
-				status: 'success' as const,
-				collapsible: true,
-				content: '已识别为“前端实现 + 组件集成”任务。',
-			},
-			{
-				key: 'tc-2',
-				title: '信息检索',
-				description: '检索组件 API 与示例模式',
-				status: thinking ? 'loading' : 'success',
-				collapsible: true,
-				content: thinking
-					? '正在检索 Welcome / Prompts / Sender / Think / ThoughtChain 的配置项...'
-					: '组件结构与属性已确认。',
-			},
-			{
-				key: 'tc-3',
-				title: '生成回答',
-				description: '组织输出并生成可执行建议',
-				status: generating ? 'loading' : 'success',
-				collapsible: true,
-				content: generating
-					? '正在组织最终回答...'
-					: '回答已生成，可以继续追问细节。',
-			},
-		],
-		[thinking, generating],
-	);
-
-	const completedThoughtChainItems = useMemo<ThoughtChainItemType[]>(
-		() => [
-			{
-				key: 'tc-1',
-				title: '意图识别',
-				description: '解析用户输入并识别任务目标',
-				status: 'success',
-				collapsible: true,
-				content: '已识别为“前端实现 + 组件集成”任务。',
-			},
-			{
-				key: 'tc-2',
-				title: '信息检索',
-				description: '检索组件 API 与示例模式',
-				status: 'success',
-				collapsible: true,
-				content: '组件结构与属性已确认。',
-			},
-			{
-				key: 'tc-3',
-				title: '生成回答',
-				description: '组织输出并生成可执行建议',
-				status: 'success',
-				collapsible: true,
-				content: '回答已生成，可以继续追问细节。',
-			},
-		],
-		[],
-	);
-
 	const buildSourcesItems = useCallback(
 		(query: string): SourcesProps['items'] => {
 			const encoded = encodeURIComponent(query);
@@ -323,6 +277,10 @@ export default function ChatContent() {
 		(raw: string) => {
 			const text = raw.trim();
 			if (!text) return;
+			if (!userAddress) {
+				setIsWalletModalOpen(true);
+				return;
+			}
 			if (generating) return;
 
 			if (!hasUserMessageRef.current) {
@@ -432,6 +390,7 @@ export default function ChatContent() {
 			clearStreamTimers,
 			generating,
 			scheduleScrollToLatest,
+			userAddress,
 		],
 	);
 
@@ -516,9 +475,6 @@ export default function ChatContent() {
 		() => ({
 			ai: (data: BubbleItemType) => {
 				const isCurrentAiMessage = String(data.key) === currentAiKey;
-				const thoughtItems = isCurrentAiMessage
-					? thoughtChainItems
-					: completedThoughtChainItems;
 				const isStreaming = Boolean(data.streaming);
 				const isAiMessage = String(data.key).startsWith(AI_KEY_PREFIX);
 
@@ -546,29 +502,15 @@ export default function ChatContent() {
 							loading={isCurrentAiMessage && thinking}
 							defaultExpanded={false}
 							style={{ marginBottom: 8 }}
-						>
-							<ThoughtChain
-								line='dashed'
-								items={thoughtItems}
-								defaultExpandedKeys={[]}
-							/>
-						</Think>
+						></Think>
 					) : undefined,
 					footer:
 						isAiMessage && String(data.content ?? '') && !isStreaming ? (
-							<div className='flex flex-col gap-2'>
-								<Actions
-									items={createAiActions(data)}
-									variant='borderless'
-									fadeInLeft
-								/>
-								<Sources
-									title={`Used ${sourcesMap[String(data.key)]?.length ?? 0} sources`}
-									items={sourcesMap[String(data.key)] ?? []}
-									defaultExpanded={false}
-									expandIconPosition='end'
-								/>
-							</div>
+							<Actions
+								items={createAiActions(data)}
+								variant='borderless'
+								fadeInLeft
+							/>
 						) : undefined,
 					footerPlacement: 'outer-start' as const,
 				};
@@ -576,14 +518,7 @@ export default function ChatContent() {
 			user: { placement: 'end' as const, variant: 'filled' as const },
 			system: { variant: 'borderless' as const },
 		}),
-		[
-			completedThoughtChainItems,
-			createAiActions,
-			currentAiKey,
-			sourcesMap,
-			thinking,
-			thoughtChainItems,
-		],
+		[createAiActions, currentAiKey, sourcesMap, thinking],
 	);
 
 	const handleCancel = useCallback(() => {
@@ -645,6 +580,57 @@ export default function ChatContent() {
 					onCancelAction={handleCancel}
 				/>
 			</div>
+
+			<Modal
+				isOpen={isWalletModalOpen}
+				onOpenChange={setIsWalletModalOpen}
+			>
+				<ModalBackdrop>
+					<ModalContainer
+						placement='center'
+						size='sm'
+					>
+						<ModalDialog>
+							<ModalHeader className='text-[var(--app-text)]'>
+								🤓Please Connect Your Wallet
+							</ModalHeader>
+							<ModalBody className='pb-5'>
+								<p className='text-sm text-[var(--app-muted)]'>
+									Connect your wallet to access LI.FI yield strategies, bridge
+									solutions, and asset allocation recommendations🎊.
+								</p>
+								<div className='pt-6 flex justify-center'>
+									<style>{`
+										.wallet-connect-button button {
+											background-color: #3b82f6 !important;
+											color: white !important;
+											border: none !important;
+											padding: 8px 32px !important;
+											border-radius: 8px !important;
+											font-weight: 550 !important;
+											font-size: 16px !important;
+											cursor: pointer !important;
+											transition: all 0.2s ease !important;
+											box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3) !important;
+										}
+										.wallet-connect-button button:hover {
+											background-color: #2563eb !important;
+											box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4) !important;
+											transform: translateY(-1px) !important;
+										}
+										.wallet-connect-button button:active {
+											transform: translateY(0) !important;
+										}
+									`}</style>
+									<div className='wallet-connect-button'>
+										<WalletButton />
+									</div>
+								</div>
+							</ModalBody>
+						</ModalDialog>
+					</ModalContainer>
+				</ModalBackdrop>
+			</Modal>
 		</div>
 	);
 }

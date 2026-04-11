@@ -1,5 +1,4 @@
-@import 'tailwindcss';
-@import '@heroui/styles';
+@import '@heroui/styles/css';
 
 /* 全局默认颜色 */
 :root {

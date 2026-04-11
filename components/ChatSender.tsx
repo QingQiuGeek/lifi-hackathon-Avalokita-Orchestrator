@@ -314,32 +314,7 @@ export default function ChatSender({
 			[],
 		);
 
-	const modelSwitchItems = useMemo<FooterSwitchItem[]>(
-		() => [
-			{
-				key: 'deep-thinking',
-				label: CHAT_SENDER_TEXT.deepThinking,
-				icon: <OpenAIOutlined />,
-				value: deepThinking,
-				onChange: setDeepThinking,
-			},
-			{
-				key: 'web-search',
-				label: CHAT_SENDER_TEXT.webSearch,
-				icon: <SearchOutlined />,
-				value: webSearch,
-				onChange: setWebSearch,
-			},
-			{
-				key: 'agent-mode',
-				label: CHAT_SENDER_TEXT.agentMode,
-				icon: <AntDesignOutlined />,
-				value: agentMode,
-				onChange: setAgentMode,
-			},
-		],
-		[agentMode, deepThinking, webSearch],
-	);
+	const modelSwitchItems = useMemo<FooterSwitchItem[]>(() => [], []);
 
 	const senderHeader = (
 		<Sender.Header
@@ -404,63 +379,13 @@ export default function ChatSender({
 						gap='small'
 						wrap
 					>
-						<Flex
-							gap={2}
-							align='center'
-							wrap
+						<Sender.Switch
+							icon={<ApiOutlined />}
+							style={iconStyle}
 						>
-							{modelSwitchItems.map((item, index) => (
-								<Flex
-									key={item.key}
-									align='center'
-									gap={2}
-								>
-									<Sender.Switch
-										icon={item.icon}
-										value={item.value}
-										onChange={item.onChange}
-									>
-										{item.label}
-									</Sender.Switch>
-									{index < modelSwitchItems.length - 1 ? (
-										<FooterDivider />
-									) : null}
-								</Flex>
-							))}
-						</Flex>
-						<Flex
-							align='center'
-							gap={2}
-						>
-							<Sender.Switch
-								icon={<ApiOutlined />}
-								style={iconStyle}
-							>
-								{CHAT_SENDER_TEXT.skillAndMcp}
-							</Sender.Switch>
-							<FooterDivider />
-
-							<Button
-								aria-label={CHAT_SENDER_TEXT.toggleAttachments}
-								style={iconStyle}
-								type='text'
-								icon={<PaperClipOutlined />}
-								onClick={() => setOpen((prev) => !prev)}
-							/>
-							<FooterDivider />
-							<Button
-								aria-label={CHAT_SENDER_TEXT.voiceInput}
-								type='text'
-								style={{
-									...iconStyle,
-									color: isRecording ? '#ff4d4f' : iconStyle.color,
-								}}
-								icon={<AudioOutlined />}
-								onClick={handleVoiceClick}
-							/>
-							<FooterDivider />
-							{actionsNode}
-						</Flex>
+							{CHAT_SENDER_TEXT.skillAndMcp}
+						</Sender.Switch>
+						{actionsNode}
 					</Flex>
 				);
 			}}

@@ -328,17 +328,6 @@ export default function Sidebar() {
 							menu={conversationMenu}
 						/>
 					</div>
-
-					{/* 登陆注册 */}
-					<div className='mt-auto p-3'>
-						<div className='bg-[rgba(255,255,255,0.05)] rounded-2xl p-4 flex flex-col gap-3'>
-							<p className='text-xs text-[rgba(255,255,255,0.7)] leading-5'>
-								Save your chat history, share chats, and personalize your
-								experience.
-							</p>
-							<Login triggerClassName='w-full cursor-pointer [background:var(--app-text)] [color:var(--app-bg)] rounded-full px-4 py-2 text-sm font-medium transition-colors opacity-95 hover:opacity-100' />
-						</div>
-					</div>
 				</>
 			)}
 		</nav>
