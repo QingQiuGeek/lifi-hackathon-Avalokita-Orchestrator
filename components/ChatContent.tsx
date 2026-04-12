@@ -27,6 +27,7 @@ import {
 } from './chatEvents';
 import ExecutionPreviewCard from './ExecutionPreviewCard';
 import Prompt from './Prompt';
+import { buildChatBubbleItems } from '@/lib/chatBubbleItems';
 
 const ChatSender = dynamic(() => import('./ChatSender'), {
 	ssr: false,
@@ -233,11 +234,7 @@ export default function ChatContent() {
 	);
 
 	const bubbleItems = useMemo<BubbleItemType[]>(
-		() =>
-			messages.map((message) => ({
-				...message,
-				content: message.role === 'ai' ? renderAiMessage(message) : message.content,
-			})),
+		() => buildChatBubbleItems(messages, renderAiMessage),
 		[messages, renderAiMessage],
 	);
 
@@ -632,7 +629,7 @@ export default function ChatContent() {
 	const createAiActions = useCallback(
 		(data: BubbleItemType): ActionsProps['items'] => {
 			const aiKey = String(data.key);
-			const text = String((data as ChatMessage).content ?? '');
+			const text = String((data.extraInfo as ChatMessage | undefined)?.content ?? '');
 
 			return [
 				{
@@ -661,10 +658,11 @@ export default function ChatContent() {
 	const bubbleRole = useMemo(
 		() => ({
 			ai: (data: BubbleItemType) => {
+				const message = data.extraInfo as ChatMessage | undefined;
 				const isCurrentAiMessage = String(data.key) === currentAiKey;
-				const isStreaming = Boolean(data.streaming);
+				const isStreaming = Boolean(message?.streaming);
 				const isAiMessage = String(data.key).startsWith(AI_KEY_PREFIX);
-				const reasoningText = String((data as ChatMessage).reasoning ?? '');
+				const reasoningText = String(message?.reasoning ?? '');
 
 				return {
 					placement: 'start' as const,
@@ -706,7 +704,7 @@ export default function ChatContent() {
 					) : undefined,
 					footer:
 						isAiMessage &&
-						String((data as ChatMessage).content ?? '') &&
+						String(message?.content ?? '') &&
 						!isStreaming ? (
 							<Actions
 								items={createAiActions(data)}
