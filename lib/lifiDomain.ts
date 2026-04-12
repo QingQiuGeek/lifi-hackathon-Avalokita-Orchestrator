@@ -1,15 +1,15 @@
 import { parseUnits } from 'viem';
 import {
 	buildRecommendationSummary,
+	buildVaultDisplayName,
+	normalizeVaultDetailResponse,
 	normalizePortfolioPositionsResponse,
 	normalizeVaultListResponse,
 	rankVaultCandidates,
 	type NormalizedPortfolioPosition,
 	type NormalizedVaultCandidate,
 } from './lifiRuntime';
-
-const EARN_API_BASE = 'https://earn.li.fi/v1/earn';
-const LIFI_QUOTE_API = 'https://li.quest/v1/quote';
+import { createLifiClient } from './lifiClient';
 
 export const USDC_TOKEN_BY_CHAIN: Record<number, string> = {
 	1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
@@ -52,47 +52,29 @@ export type BuildQuoteResult =
 			error: string;
 	  };
 
-async function parseJsonResponse(response: Response): Promise<unknown> {
-	const contentType = response.headers.get('content-type') || '';
-	if (!contentType.includes('application/json')) {
-		return response.text();
-	}
-
-	return response.json();
-}
-
-function toErrorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : 'Unknown error';
-}
+const lifiClient = createLifiClient();
 
 export async function searchVaults(input: {
 	chainId: number;
 	limit?: number;
 }): Promise<SearchVaultsResult> {
 	try {
-		const params = new URLSearchParams({
-			chainId: String(input.chainId),
+		const response = await lifiClient.getVaults({
+			chainId: input.chainId,
 			underlyingTokens: 'USDC',
-			limit: String(input.limit ?? 25),
+			limit: input.limit ?? 25,
 		});
-		const response = await fetch(`${EARN_API_BASE}/vaults?${params}`, {
-			cache: 'no-store',
-		});
-		const payload = await parseJsonResponse(response);
 
-		if (!response.ok) {
+		if (!response.success) {
 			return {
 				success: false,
 				dataSource: 'fallback',
 				vaults: [],
-				error:
-					typeof payload === 'string'
-						? payload
-						: `LI.FI vault search failed with status ${response.status}.`,
+				error: response.error,
 			};
 		}
 
-		const normalized = normalizeVaultListResponse(payload);
+		const normalized = normalizeVaultListResponse(response.data);
 		if (!normalized.success) {
 			return {
 				success: false,
@@ -103,10 +85,10 @@ export async function searchVaults(input: {
 		}
 
 		const total =
-			payload &&
-			typeof payload === 'object' &&
-			typeof (payload as { total?: unknown }).total === 'number'
-				? (payload as { total: number }).total
+			response.data &&
+			typeof response.data === 'object' &&
+			typeof (response.data as { total?: unknown }).total === 'number'
+				? (response.data as { total: number }).total
 				: normalized.vaults.length;
 
 		return {
@@ -120,7 +102,7 @@ export async function searchVaults(input: {
 			success: false,
 			dataSource: 'fallback',
 			vaults: [],
-			error: toErrorMessage(error),
+			error: error instanceof Error ? error.message : 'Unknown error',
 		};
 	}
 }
@@ -129,54 +111,43 @@ export async function getVaultDetails(input: {
 	chainId: number;
 	address: string;
 }): Promise<NormalizedVaultCandidate | null> {
-	const result = await searchVaults({
+	const response = await lifiClient.getVaultByChainAndAddress({
 		chainId: input.chainId,
-		limit: 100,
+		address: input.address,
 	});
 
-	if (!result.success) {
+	if (!response.success) {
 		return null;
 	}
 
-	return (
-		result.vaults.find(
-			(vault) => vault.address.toLowerCase() === input.address.toLowerCase(),
-		) ?? null
-	);
+	return normalizeVaultDetailResponse(response.data);
 }
 
 export async function getPortfolioPositions(input: {
 	userAddress: string;
 }): Promise<PortfolioPositionsResult> {
 	try {
-		const response = await fetch(
-			`${EARN_API_BASE}/portfolio/${input.userAddress}/positions`,
-			{
-				cache: 'no-store',
-			},
-		);
-		const payload = await parseJsonResponse(response);
+		const response = await lifiClient.getPortfolioPositions({
+			userAddress: input.userAddress,
+		});
 
-		if (!response.ok) {
+		if (!response.success) {
 			return {
 				success: false,
 				positions: [],
-				error:
-					typeof payload === 'string'
-						? payload
-						: `LI.FI portfolio lookup failed with status ${response.status}.`,
+				error: response.error,
 			};
 		}
 
 		return {
 			success: true,
-			positions: normalizePortfolioPositionsResponse(payload),
+			positions: normalizePortfolioPositionsResponse(response.data),
 		};
 	} catch (error) {
 		return {
 			success: false,
 			positions: [],
-			error: toErrorMessage(error),
+			error: error instanceof Error ? error.message : 'Unknown error',
 		};
 	}
 }
@@ -208,29 +179,31 @@ export async function buildDepositQuote(input: {
 			toAddress: input.fromAddress,
 		});
 
-		const response = await fetch(`${LIFI_QUOTE_API}?${params}`, {
-			cache: 'no-store',
+		const response = await lifiClient.getQuote({
+			fromChain: input.sourceChainId,
+			toChain: input.targetChainId,
+			fromToken,
+			toToken: input.targetVaultAddress,
+			fromAmount: amountBaseUnits,
+			fromAddress: input.fromAddress,
+			toAddress: input.fromAddress,
 		});
-		const payload = await parseJsonResponse(response);
 
-		if (!response.ok) {
+		if (!response.success) {
 			return {
 				success: false,
-				error:
-					typeof payload === 'string'
-						? payload
-						: `LI.FI quote failed with status ${response.status}.`,
+				error: response.error,
 			};
 		}
 
 		return {
 			success: true,
-			quote: payload as Record<string, unknown>,
+			quote: response.data,
 		};
 	} catch (error) {
 		return {
 			success: false,
-			error: toErrorMessage(error),
+			error: error instanceof Error ? error.message : 'Unknown error',
 		};
 	}
 }
@@ -299,8 +272,10 @@ export function renderEarnRecommendation(input: {
 	);
 
 	if (input.selectedVault) {
+		const displayName = buildVaultDisplayName(input.selectedVault);
 		const reasons = [
 			'## Why This Pick',
+			`- Recommended vault: ${displayName}`,
 			`- Current live APY: ${input.selectedVault.apyTotal.toFixed(2)}%`,
 			`- TVL: $${input.selectedVault.tvlUsd.toLocaleString('en-US')}`,
 			`- Protocol: ${input.selectedVault.protocolName}`,

@@ -1,6 +1,7 @@
 import { generateText } from 'ai';
 import { getAgentConfig } from '@/lib/agentConfig';
 import { getModelFromConfig } from '@/lib/agentClient';
+import { buildPlannerPrompt } from '@/lib/plannerPrompt';
 import {
 	buildPlannerFallback,
 	detectIntentFromMessage,
@@ -8,6 +9,10 @@ import {
 	type PlannerOutput,
 	type SupportedWalletChainId,
 } from '@/lib/plannerRuntime';
+import {
+	buildWalletContextResponse,
+	isWalletContextQuestion,
+} from '@/lib/walletContext';
 import { earningAgentStream, type EarningStreamChunk } from './earning';
 
 type MainAgentInput = {
@@ -28,19 +33,6 @@ export type MainAgentStreamChunk =
 			intent: 'earn' | 'bridge' | 'monitor' | 'unknown';
 			chainId: number;
 	  };
-
-function buildPlannerPrompt(input: MainAgentInput): string {
-	const history = input.messages
-		.slice(-6)
-		.map((message) => `${message.role}: ${message.content}`)
-		.join('\n');
-
-	return [
-		`Wallet chain: ${input.walletChainId}`,
-		`Current message: ${input.userMessage}`,
-		history ? `Recent messages:\n${history}` : '',
-	].filter(Boolean).join('\n\n');
-}
 
 async function planRequest(input: MainAgentInput): Promise<PlannerOutput> {
 	const fallback = buildPlannerFallback({
@@ -134,6 +126,22 @@ export async function* mainAgentStream(
 			type: 'done',
 			intent: effectiveIntent,
 			chainId: plan.targetChain,
+		};
+		return;
+	}
+
+	if (isWalletContextQuestion(input.userMessage)) {
+		yield {
+			type: 'response',
+			content: buildWalletContextResponse({
+				userAddress: input.userAddress,
+				walletChainId: input.walletChainId,
+			}),
+		};
+		yield {
+			type: 'done',
+			intent: 'unknown',
+			chainId: input.walletChainId,
 		};
 		return;
 	}

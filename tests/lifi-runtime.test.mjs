@@ -75,6 +75,40 @@ test('normalizeVaultListResponse rejects invalid payloads without assuming array
 	});
 });
 
+test('normalizeVaultDetailResponse reads a single live vault record', async () => {
+	const { normalizeVaultDetailResponse } = await loadLifiRuntimeModule();
+
+	const vault = normalizeVaultDetailResponse({
+		address: '0xvaultdetail',
+		chainId: 42161,
+		name: 'USDC',
+		protocol: { name: 'yo-protocol' },
+		underlyingTokens: [{ symbol: 'USDC', address: '0xusdc', decimals: 6 }],
+		tags: ['stablecoin'],
+		isTransactional: true,
+		isRedeemable: true,
+		analytics: {
+			apy: { total: 6.1 },
+			tvl: { usd: '1234567' },
+		},
+	});
+
+	assert.deepEqual(vault, {
+		address: '0xvaultdetail',
+		chainId: 42161,
+		name: 'USDC',
+		protocolName: 'yo-protocol',
+		underlyingSymbol: 'USDC',
+		underlyingTokenAddress: '0xusdc',
+		apyTotal: 6.1,
+		tvlUsd: 1234567,
+		tags: ['stablecoin'],
+		isTransactional: true,
+		isRedeemable: true,
+		dataSource: 'live',
+	});
+});
+
 test('rankVaultCandidates prefers eligible live transactional USDC vaults', async () => {
 	const { rankVaultCandidates } = await loadLifiRuntimeModule();
 

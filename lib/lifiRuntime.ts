@@ -119,6 +119,16 @@ function normalizeVaultRecord(rawVault: RawVaultRecord): NormalizedVaultCandidat
 	};
 }
 
+export function normalizeVaultDetailResponse(
+	raw: unknown,
+): NormalizedVaultCandidate | null {
+	if (!raw || typeof raw !== 'object') {
+		return null;
+	}
+
+	return normalizeVaultRecord(raw as RawVaultRecord);
+}
+
 export function buildVaultDisplayName(input: {
 	name: string;
 	protocolName: string;
