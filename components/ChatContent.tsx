@@ -8,10 +8,16 @@ import type { ActionsProps, BubbleItemType } from '@ant-design/x';
 import { Avatar } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useAccount } from 'wagmi';
 import { useConnectModal } from '@rainbow-me/rainbowkit';
+import { useAccount, useChainId, useSwitchChain } from 'wagmi';
 import favicon from '../app/favicon.ico';
-
+import type { ExecutionPreview } from '@/lib/executionRuntime';
+import type { NormalizedVaultCandidate } from '@/lib/lifiRuntime';
+import type { PlannerOutput } from '@/lib/plannerRuntime';
+import {
+	executePreviewTransaction,
+	type ClientExecutionState,
+} from '@/lib/executionClient';
 import {
 	CHAT_FIRST_USER_MESSAGE_EVENT,
 	SIDEBAR_ACTIVE_CONVERSATION_EVENT,
@@ -19,6 +25,7 @@ import {
 	type SidebarActiveConversationDetail,
 	type SidebarNewConversationDetail,
 } from './chatEvents';
+import ExecutionPreviewCard from './ExecutionPreviewCard';
 import Prompt from './Prompt';
 
 const ChatSender = dynamic(() => import('./ChatSender'), {
@@ -36,62 +43,60 @@ type ChatMessage = {
 	role: 'user' | 'ai' | 'system';
 	content: string;
 	reasoning?: string;
-	loading?: boolean;
 	streaming?: boolean;
+	plan?: PlannerOutput;
+	executionPreview?: ExecutionPreview;
+	selectedVault?: NormalizedVaultCandidate | null;
+	alternatives?: NormalizedVaultCandidate[];
+	executionState?: ClientExecutionState;
 };
+
+type StreamPayload =
+	| { type: 'thinking'; content: string }
+	| { type: 'response'; content: string }
+	| { type: 'error'; content?: string }
+	| { type: 'done' }
+	| { type: 'plan'; plan: PlannerOutput }
+	| {
+			type: 'execution_preview';
+			preview: ExecutionPreview;
+			selectedVault: NormalizedVaultCandidate | null;
+			alternatives: NormalizedVaultCandidate[];
+	  };
 
 const AI_KEY_PREFIX = 'ai-';
 const USER_KEY_PREFIX = 'user-';
 
 const MOCK_CONVERSATION_MESSAGES: Record<string, ChatMessage[]> = {
 	'conv-1': [
-		{
-			key: 'user-1001',
-			role: 'user',
-			content: '我想搭一个可扩展的前端设计系统。',
-		},
+		{ key: 'user-1001', role: 'user', content: 'Find 5%+ APY vault on Base' },
 		{
 			key: 'ai-1001',
 			role: 'ai',
 			content:
-				'建议先定义 token、基础组件和页面模板三层结构，再通过统一规范做版本化管理。',
-		},
-	],
-	'conv-2': [
-		{
-			key: 'user-1002',
-			role: 'user',
-			content: 'Tailwind 和 Styled Components 怎么选？',
-		},
-		{
-			key: 'ai-1002',
-			role: 'ai',
-			content:
-				'如果你要更高开发速度与一致规范，优先 Tailwind；若强调组件封装隔离可选 Styled Components。',
-		},
-	],
-	'conv-3': [
-		{ key: 'user-1003', role: 'user', content: 'RSC 适合什么场景？' },
-		{
-			key: 'ai-1003',
-			role: 'ai',
-			content:
-				'适合数据读取密集且对首屏速度敏感的页面，能有效减少客户端 JS 负担。',
-		},
-	],
-	'conv-4': [
-		{ key: 'user-1004', role: 'user', content: '如何优化大模型推理延迟？' },
-		{
-			key: 'ai-1004',
-			role: 'ai',
-			content:
-				'可以从 prompt 压缩、并行检索、流式输出与缓存命中率四个方向同时优化。',
+				'Source: live\n\nRecommendation: RE7USDC by morpho-v1 on Base\n\nAPY: 5.71% | TVL: $2,051,223',
 		},
 	],
 };
 
+function toHistoryMessages(messages: ChatMessage[]) {
+	return messages
+		.filter(
+			(message) =>
+				(message.role === 'user' || message.role === 'ai') &&
+				message.content.trim().length > 0,
+		)
+		.slice(-6)
+		.map((message) => ({
+			role: message.role as 'user' | 'ai',
+			content: message.content,
+		}));
+}
+
 export default function ChatContent() {
 	const { address: userAddress } = useAccount();
+	const walletChainId = useChainId();
+	const { switchChainAsync } = useSwitchChain();
 	const { openConnectModal } = useConnectModal();
 	const [value, setValue] = useState('');
 	const [thinking, setThinking] = useState(false);
@@ -156,11 +161,6 @@ export default function ChatContent() {
 								{children}
 							</td>
 						),
-						blockquote: ({ children }) => (
-							<blockquote className='border-l-4 border-black/10 pl-3 italic text-black/70'>
-								{children}
-							</blockquote>
-						),
 					}}
 				>
 					{text}
@@ -169,16 +169,76 @@ export default function ChatContent() {
 		);
 	}, []);
 
+	const updateExecutionState = useCallback(
+		(aiKey: string, executionState: ClientExecutionState) => {
+			setMessages((prev) =>
+				prev.map((message) =>
+					message.key === aiKey
+						? {
+								...message,
+								executionState,
+							}
+						: message,
+				),
+			);
+		},
+		[],
+	);
+
+	const executeMessagePlan = useCallback(
+		async (aiKey: string) => {
+			const target = messages.find((message) => message.key === aiKey);
+			if (!target?.executionPreview) {
+				return;
+			}
+
+			try {
+				await executePreviewTransaction({
+					preview: target.executionPreview,
+					switchChainAsync,
+					onStateChange: (state) => updateExecutionState(aiKey, state),
+				});
+			} catch (error) {
+				updateExecutionState(aiKey, {
+					status: 'failed',
+					txHashes: [],
+					explorerLinks: [],
+					error:
+						error instanceof Error
+							? error.message
+							: 'Execution failed unexpectedly.',
+				});
+			}
+		},
+		[messages, switchChainAsync, updateExecutionState],
+	);
+
+	const renderAiMessage = useCallback(
+		(message: ChatMessage) => (
+			<div>
+				{renderMarkdownContent(message.content)}
+				<ExecutionPreviewCard
+					plan={message.plan}
+					preview={message.executionPreview}
+					selectedVault={message.selectedVault}
+					alternatives={message.alternatives}
+					executionState={message.executionState}
+					onExecute={() => {
+						void executeMessagePlan(message.key);
+					}}
+				/>
+			</div>
+		),
+		[executeMessagePlan, renderMarkdownContent],
+	);
+
 	const bubbleItems = useMemo<BubbleItemType[]>(
 		() =>
 			messages.map((message) => ({
 				...message,
-				content:
-					message.role === 'ai'
-						? renderMarkdownContent(message.content)
-						: message.content,
+				content: message.role === 'ai' ? renderAiMessage(message) : message.content,
 			})),
-		[messages, renderMarkdownContent],
+		[messages, renderAiMessage],
 	);
 
 	const scrollToLatest = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -189,7 +249,6 @@ export default function ChatContent() {
 			'.ant-bubble-list-scroll-box',
 		);
 		const scrollTarget = bubbleScrollBox ?? container;
-
 		scrollTarget.scrollTo({
 			top: scrollTarget.scrollHeight,
 			behavior,
@@ -222,10 +281,9 @@ export default function ChatContent() {
 	}, [clearAllTimers]);
 
 	useEffect(() => {
-		hasUserMessageRef.current = messages.some((m) => m.role === 'user');
+		hasUserMessageRef.current = messages.some((message) => message.role === 'user');
 	}, [messages]);
 
-	// 处理钱包断开连接：刷新页面回到首页
 	useEffect(() => {
 		if (userAddress) {
 			wasConnectedRef.current = true;
@@ -254,6 +312,7 @@ export default function ChatContent() {
 			SIDEBAR_NEW_CONVERSATION_EVENT,
 			handleNewConversation,
 		);
+
 		return () => {
 			window.removeEventListener(
 				SIDEBAR_NEW_CONVERSATION_EVENT,
@@ -284,6 +343,7 @@ export default function ChatContent() {
 			SIDEBAR_ACTIVE_CONVERSATION_EVENT,
 			handleActiveConversation,
 		);
+
 		return () => {
 			window.removeEventListener(
 				SIDEBAR_ACTIVE_CONVERSATION_EVENT,
@@ -311,13 +371,13 @@ export default function ChatContent() {
 			}
 
 			pendingScrollRef.current = true;
-
 			clearAllTimers();
 
 			const timeId = String(++messageIdRef.current);
 			const streamToken = ++activeStreamTokenRef.current;
 			const userKey = `${USER_KEY_PREFIX}${timeId}`;
 			const aiKey = `${AI_KEY_PREFIX}${timeId}`;
+			const history = toHistoryMessages(messages);
 
 			setValue('');
 			setThinking(true);
@@ -326,23 +386,30 @@ export default function ChatContent() {
 			setMessages((prev) => [
 				...prev,
 				{ key: userKey, role: 'user', content: text },
-				{ key: aiKey, role: 'ai', content: '', reasoning: '', streaming: true },
+				{
+					key: aiKey,
+					role: 'ai',
+					content: '',
+					reasoning: '',
+					streaming: true,
+					executionState: {
+						status: 'idle',
+						txHashes: [],
+						explorerLinks: [],
+					},
+				},
 			]);
 			scheduleScrollToLatest('auto');
 
 			const abortController = new AbortController();
 			streamAbortRef.current = abortController;
 
-			const applyChunk = (chunk: {
-				type: 'thinking' | 'response' | 'error' | 'done';
-				content?: string;
-			}) => {
+			const applyChunk = (chunk: StreamPayload) => {
 				if (activeStreamTokenRef.current !== streamToken) return;
 
 				switch (chunk.type) {
 					case 'thinking':
 						setThinking(true);
-						if (!chunk.content) return;
 						setMessages((prev) =>
 							prev.map((item) =>
 								item.key === aiKey
@@ -357,13 +424,39 @@ export default function ChatContent() {
 						return;
 					case 'response':
 						setThinking(false);
-						if (!chunk.content) return;
 						setMessages((prev) =>
 							prev.map((item) =>
 								item.key === aiKey
 									? {
 											...item,
 											content: `${item.content}${chunk.content}`,
+										}
+									: item,
+							),
+						);
+						scheduleScrollToLatest('auto');
+						return;
+					case 'plan':
+						setMessages((prev) =>
+							prev.map((item) =>
+								item.key === aiKey
+									? {
+											...item,
+											plan: chunk.plan,
+										}
+									: item,
+							),
+						);
+						return;
+					case 'execution_preview':
+						setMessages((prev) =>
+							prev.map((item) =>
+								item.key === aiKey
+									? {
+											...item,
+											executionPreview: chunk.preview,
+											selectedVault: chunk.selectedVault,
+											alternatives: chunk.alternatives,
 										}
 									: item,
 							),
@@ -378,7 +471,9 @@ export default function ChatContent() {
 									? {
 											...item,
 											content:
-												item.content || chunk.content || '请求失败，请重试。',
+												item.content ||
+												chunk.content ||
+												'Request failed. Please retry.',
 										}
 									: item,
 							),
@@ -411,13 +506,14 @@ export default function ChatContent() {
 					body: JSON.stringify({
 						message: text,
 						userAddress,
-						chainId: 8453,
+						walletChainId,
+						messages: history,
 					}),
 					signal: abortController.signal,
 				});
 
 				if (!response.ok || !response.body) {
-					throw new Error(`请求失败（${response.status}）`);
+					throw new Error(`Request failed with status ${response.status}.`);
 				}
 
 				const reader = response.body.getReader();
@@ -438,7 +534,7 @@ export default function ChatContent() {
 							.find((line) => line.startsWith('data: '));
 						if (!dataLine) continue;
 
-						const payload = JSON.parse(dataLine.slice(6));
+						const payload = JSON.parse(dataLine.slice(6)) as StreamPayload;
 						applyChunk(payload);
 					}
 				}
@@ -446,9 +542,14 @@ export default function ChatContent() {
 				if (abortController.signal.aborted) {
 					return;
 				}
-				const errorMsg =
-					error instanceof Error ? error.message : '请求失败，请稍后再试。';
-				applyChunk({ type: 'error', content: errorMsg });
+
+				applyChunk({
+					type: 'error',
+					content:
+						error instanceof Error
+							? error.message
+							: 'Request failed. Please retry later.',
+				});
 			} finally {
 				if (streamAbortRef.current === abortController) {
 					streamAbortRef.current = null;
@@ -471,14 +572,15 @@ export default function ChatContent() {
 		[
 			clearAllTimers,
 			generating,
+			messages,
 			openConnectModal,
 			scheduleScrollToLatest,
 			userAddress,
+			walletChainId,
 		],
 	);
 
-	// 判断是否有用户消息（即是否开始对话）
-	const hasUserMessage = messages.some((m) => m.role === 'user');
+	const hasUserMessage = messages.some((message) => message.role === 'user');
 
 	useEffect(() => {
 		if (!hasUserMessage) return;
@@ -487,6 +589,7 @@ export default function ChatContent() {
 			scheduleScrollToLatest('smooth');
 			return;
 		}
+
 		const rafId = window.requestAnimationFrame(() => {
 			scrollToLatest('auto');
 		});
@@ -501,10 +604,10 @@ export default function ChatContent() {
 			if (generating) return;
 			const sourceKey = aiKey.replace(/^ai-/, USER_KEY_PREFIX);
 			const source = messages.find(
-				(m) => m.key === sourceKey && m.role === 'user',
+				(message) => message.key === sourceKey && message.role === 'user',
 			);
 			if (source?.content) {
-				sendMessage(source.content);
+				void sendMessage(source.content);
 			}
 		},
 		[generating, messages, sendMessage],
@@ -518,8 +621,9 @@ export default function ChatContent() {
 				return;
 			}
 		} catch {
-			// Ignore native share cancel/error and fallback to clipboard.
+			// Ignore and fall back to clipboard.
 		}
+
 		if (navigator.clipboard) {
 			await navigator.clipboard.writeText(text);
 		}
@@ -528,7 +632,7 @@ export default function ChatContent() {
 	const createAiActions = useCallback(
 		(data: BubbleItemType): ActionsProps['items'] => {
 			const aiKey = String(data.key);
-			const text = String(data.content ?? '');
+			const text = String((data as ChatMessage).content ?? '');
 
 			return [
 				{
@@ -538,13 +642,13 @@ export default function ChatContent() {
 				{
 					key: 'retry',
 					icon: <RedoOutlined />,
-					label: '重试',
+					label: 'Retry',
 					onItemClick: () => handleRetry(aiKey),
 				},
 				{
 					key: 'share',
 					icon: <ShareAltOutlined />,
-					label: '分享',
+					label: 'Share',
 					onItemClick: () => {
 						void handleShare(text);
 					},
@@ -584,10 +688,10 @@ export default function ChatContent() {
 						<Think
 							title={
 								isCurrentAiMessage && thinking
-									? '思考中'
+									? 'Thinking'
 									: reasoningText
-										? '思考完成'
-										: '思考中'
+										? 'Reasoning'
+										: 'Thinking'
 							}
 							loading={isCurrentAiMessage && thinking}
 							defaultExpanded={false}
@@ -601,7 +705,9 @@ export default function ChatContent() {
 						</Think>
 					) : undefined,
 					footer:
-						isAiMessage && String(data.content ?? '') && !isStreaming ? (
+						isAiMessage &&
+						String((data as ChatMessage).content ?? '') &&
+						!isStreaming ? (
 							<Actions
 								items={createAiActions(data)}
 								variant='borderless'
@@ -637,12 +743,9 @@ export default function ChatContent() {
 
 	return (
 		<div className='flex-1 min-h-0 px-4 pb-4 flex flex-col gap-3'>
-			{/* 内容区：包含 Prompts 或对话框 */}
 			<div className='mx-auto flex flex-1 w-full max-w-md sm:max-w-2xl lg:max-w-4xl flex-col min-h-0'>
-				{/* 未开始对话时：Prompts 垂直居中 */}
 				{!hasUserMessage && <Prompt onItemClick={sendMessage} />}
 
-				{/* 开始对话后：显示对话框 */}
 				{hasUserMessage && (
 					<div
 						ref={conversationRef}
@@ -661,7 +764,6 @@ export default function ChatContent() {
 				)}
 			</div>
 
-			{/* 输入框固定在底部 */}
 			<div
 				className='mx-auto w-full max-w-md sm:max-w-2xl lg:max-w-4xl rounded-2xl p-2 flex-shrink-0 border [border-color:var(--app-border)]'
 				style={{

@@ -1,188 +1,140 @@
-/**
- * Earning Agent
- * 职责：推荐最优 vault，计算预期收益
- */
-
-import { generateText } from 'ai';
-import { streamText } from 'ai';
-import { getAgentConfig } from '@/lib/agentConfig';
-import { getModelFromConfig } from '@/lib/agentClient';
-import { agentTools } from '../tools';
+import { buildExecutionPreview, type ExecutionPreview } from '@/lib/executionRuntime';
+import {
+	buildDepositQuote,
+	getPortfolioPositions,
+	renderEarnRecommendation,
+	searchVaults,
+	selectRecommendedVault,
+} from '@/lib/lifiDomain';
+import type { NormalizedVaultCandidate } from '@/lib/lifiRuntime';
+import type { PlannerOutput } from '@/lib/plannerRuntime';
 import { SUPPORTED_CHAINS } from '@/lib/chains';
 
-interface EarningAgentInput {
+export type EarningAgentInput = {
 	userMessage: string;
 	userAddress: string;
-	chainId: number;
-}
-
-interface EarningAgentOutput {
-	intent: 'earn';
-	response: string;
-	vaults?: EarningVaultSummary[];
-	selectedVault?: EarningVaultSummary;
-}
-
-interface EarningVaultSummary {
-	address: string;
-	name: string;
-	protocol: string;
-	apy: string;
-	tvl: number | string;
-	underlyingTokens: string[];
-	tags?: string[];
-	openForDeposits?: boolean;
-}
+	plan: PlannerOutput;
+};
 
 export type EarningStreamChunk =
 	| { type: 'thinking'; content: string }
 	| { type: 'response'; content: string }
-	| { type: 'error'; content: string };
+	| { type: 'error'; content: string }
+	| { type: 'plan'; plan: PlannerOutput }
+	| {
+			type: 'execution_preview';
+			preview: ExecutionPreview;
+			selectedVault: NormalizedVaultCandidate | null;
+			alternatives: NormalizedVaultCandidate[];
+	  };
 
-export async function earningAgent(
-	input: EarningAgentInput,
-): Promise<EarningAgentOutput> {
-	const { userMessage, userAddress, chainId } = input;
-
-	const agentConfig = getAgentConfig('earning');
-	const model = getModelFromConfig(agentConfig);
-
-	const systemPrompt = `你是一个智能的 DeFi 理财助手（Earning Agent）。
-你的职责是帮用户发现与推荐最优的收益 vault（Earning Vault）。
-
-当用户表达存入意图时，你需要：
-1. 理解用户的需求（金额、链、风险偏好等）
-2. 调用 listVaults 工具查询可用的 vault
-3. 根据 APY、TVL、风险等因素推荐 TOP 3
-4. 非常清楚地用表格或列表展示推荐结果
-5. 计算预期收益（调用 estimateYield）
-
-重要：
-- 始终用表格格式展示 vault 对比（名称、Protocol、APY、TVL、风险评分）
-- 用户获得一个 vault 的 APY 信息后，可以计算他存入后的预期收益
-- 回答必须中英文混用，简洁清晰
-- 如果用户没有提供链，默认使用 Base (8453)
-- 始终彬彬有礼，解释你的推荐理由
-
-示例：
-- 用户："我想在 Base 存 500 USDC 最高收益"
-- 你回复："根据你的需求，我为你推荐以下 3 个 vault...（表格）...预期 30 天收益约 $X"
-`;
-
-	const userPrompt = `用户请求（第一次交互）：
-"${userMessage}"
-
-用户地址： ${userAddress}
-目标链（Chain ID）： ${chainId} (${SUPPORTED_CHAINS[chainId as keyof typeof SUPPORTED_CHAINS]?.name || 'Unknown'})
-
-根据这个请求：
-1. 如果是存入请求，先用 listVaults 工具查询该链的顶级 vault（按 APY 排序，limit=10）
-2. 从返回的列表中挑选 TOP 3 最合适的 vault（考虑 APY、TVL、Tags 等）
-3. 用表格清晰展示推荐结果
-4. 如果用户提到了金额，调用 estimateYield 计算 30 天或用户指定时期的收益
-5. 给出最终推荐和理由`;
-
-	try {
-		const result = await generateText({
-			model,
-			system: systemPrompt,
-			prompt: userPrompt,
-			tools: agentTools,
-		});
-
-		return {
-			intent: 'earn',
-			response: result.text,
-		};
-	} catch (error) {
-		const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-		return {
-			intent: 'earn',
-			response: `抱歉，Earning Agent 出现错误：${errorMsg}。请重试。`,
-		};
-	}
+function chainName(chainId: number): string {
+	return (
+		SUPPORTED_CHAINS[chainId as keyof typeof SUPPORTED_CHAINS]?.name ||
+		`Chain ${chainId}`
+	);
 }
 
 export async function* earningAgentStream(
 	input: EarningAgentInput,
 ): AsyncGenerator<EarningStreamChunk> {
-	const { userMessage, userAddress, chainId } = input;
+	yield { type: 'plan', plan: input.plan };
+	yield { type: 'thinking', content: 'Searching live LI.FI vaults...\n' };
 
-	const agentConfig = getAgentConfig('earning');
-	const model = getModelFromConfig(agentConfig);
+	const vaultResult = await searchVaults({
+		chainId: input.plan.targetChain,
+		limit: 25,
+	});
 
-	const systemPrompt = `你是一个智能的 DeFi 理财助手（Earning Agent）。
-你的职责是帮用户发现与推荐最优的收益 vault（Earning Vault）。
+	if (!vaultResult.success) {
+		yield {
+			type: 'response',
+			content: [
+				'Source: fallback',
+				`LI.FI live vault search failed: ${vaultResult.error}`,
+				'No controlled fallback registry is configured in this branch, so I cannot safely recommend a vault yet.',
+			].join('\n\n'),
+		};
+		return;
+	}
 
-当用户表达存入意图时，你需要：
-1. 理解用户的需求（金额、链、风险偏好等）
-2. 调用 listVaults 工具查询可用的 vault
-3. 根据 APY、TVL、风险等因素推荐 TOP 3
-4. 非常清楚地用表格或列表展示推荐结果
-5. 计算预期收益（调用 estimateYield）
+	const recommendation = selectRecommendedVault({
+		vaults: vaultResult.vaults,
+		minApy: input.plan.minApy,
+		riskPreference: input.plan.riskPreference,
+	});
 
-重要：
-- 始终用表格格式展示 vault 对比（名称、Protocol、APY、TVL、风险评分）
-- 用户获得一个 vault 的 APY 信息后，可以计算他存入后的预期收益
-- 回答必须中英文混用，简洁清晰
-- 如果用户没有提供链，默认使用 Base (8453)
-- 始终彬彬有礼，解释你的推荐理由`;
+	if (!recommendation.selectedVault) {
+		yield {
+			type: 'response',
+			content: [
+				'Source: live',
+				`No live transactional USDC vaults are currently available on ${chainName(
+					input.plan.targetChain,
+				)}.`,
+				'Execution preview is unavailable because there is no vault to target.',
+			].join('\n\n'),
+		};
+		return;
+	}
 
-	const userPrompt = `用户请求（第一次交互）：
-"${userMessage}"
+	yield { type: 'thinking', content: 'Checking wallet context...\n' };
+	const portfolioResult = await getPortfolioPositions({
+		userAddress: input.userAddress,
+	});
 
-用户地址： ${userAddress}
-目标链（Chain ID）： ${chainId} (${SUPPORTED_CHAINS[chainId as keyof typeof SUPPORTED_CHAINS]?.name || 'Unknown'})
+	let quotePayload: Record<string, unknown> | null = null;
+	let quoteError: string | null = null;
 
-根据这个请求：
-1. 如果是存入请求，先用 listVaults 工具查询该链的顶级 vault（按 APY 排序，limit=10）
-2. 从返回的列表中挑选 TOP 3 最合适的 vault（考虑 APY、TVL、Tags 等）
-3. 用表格清晰展示推荐结果
-4. 如果用户提到了金额，调用 estimateYield 计算 30 天或用户指定时期的收益
-5. 给出最终推荐和理由`;
-
-	try {
-		const result = streamText({
-			model,
-			system: systemPrompt,
-			prompt: userPrompt,
-			tools: agentTools,
-			maxSteps: 5,
-			toolCallStreaming: true,
+	if (input.plan.amount != null) {
+		yield { type: 'thinking', content: 'Building LI.FI execution quote...\n' };
+		const quoteResult = await buildDepositQuote({
+			sourceChainId: input.plan.sourceChain,
+			targetChainId: input.plan.targetChain,
+			amount: input.plan.amount,
+			fromAddress: input.userAddress,
+			targetVaultAddress: recommendation.selectedVault.address,
 		});
 
-		for await (const part of result.fullStream) {
-			switch (part.type) {
-				case 'reasoning':
-					yield { type: 'thinking', content: part.textDelta };
-					break;
-				case 'tool-call':
-					yield {
-						type: 'thinking',
-						content: `\n[Tool] ${part.toolName}...\n`,
-					};
-					break;
-				case 'tool-result':
-					yield {
-						type: 'thinking',
-						content: `\n[ToolDone] ${part.toolName}\n`,
-					};
-					break;
-				case 'text-delta':
-					yield { type: 'response', content: part.textDelta };
-					break;
-				case 'error':
-					yield { type: 'error', content: '模型流式输出异常，请重试。' };
-					break;
-				default:
-					break;
-			}
+		if (quoteResult.success) {
+			quotePayload = quoteResult.quote;
+		} else {
+			quoteError = quoteResult.error;
 		}
-	} catch (error) {
-		const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-		yield {
-			type: 'error',
-			content: `抱歉，Earning Agent 出现错误：${errorMsg}。请重试。`,
-		};
 	}
+
+	const executionPreview = buildExecutionPreview({
+		plan: input.plan,
+		selectedVault: recommendation.selectedVault,
+		quote: quotePayload as {
+			estimate?: {
+				toAmount?: string;
+				toAmountMin?: string;
+				executionDuration?: number;
+				feeCosts?: Array<{ amountUSD?: string }>;
+			};
+			tool?: string;
+		} | null,
+	});
+
+	yield {
+		type: 'execution_preview',
+		preview: executionPreview,
+		selectedVault: recommendation.selectedVault,
+		alternatives: recommendation.alternatives,
+	};
+
+	const content = renderEarnRecommendation({
+		chainName: chainName(input.plan.targetChain),
+		dataSource: 'live',
+		fallbackReason: quoteError || undefined,
+		selectedVault: recommendation.selectedVault,
+		alternatives: recommendation.alternatives,
+		portfolioPositions: portfolioResult.success ? portfolioResult.positions : [],
+		plan: input.plan,
+		executionPreview,
+		thresholdSatisfied: recommendation.thresholdSatisfied,
+	});
+
+	yield { type: 'response', content };
 }

@@ -1,8 +1,3 @@
-/**
- * API Route: POST /api/agents
- * 涓诲叆鍙ｇ偣锛屾帴鏀剁敤鎴锋秷鎭苟璋冪敤 MainAgent
- */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeAgentRequest } from '@/lib/agentRuntime';
 import { mainAgentStream } from './agents/main';
@@ -24,7 +19,8 @@ export async function POST(request: NextRequest) {
 			);
 		}
 
-		const { message, userAddress, chainId } = normalizedRequest.value;
+		const { message, userAddress, walletChainId, messages } =
+			normalizedRequest.value;
 		const encoder = new TextEncoder();
 
 		const stream = new ReadableStream({
@@ -39,14 +35,17 @@ export async function POST(request: NextRequest) {
 					for await (const chunk of mainAgentStream({
 						userMessage: message,
 						userAddress,
-						chainId,
+						walletChainId,
+						messages,
 					})) {
 						send(chunk);
 					}
 				} catch (error) {
-					const errorMsg =
-						error instanceof Error ? error.message : 'Unknown error';
-					send({ type: 'error', content: errorMsg });
+					send({
+						type: 'error',
+						content:
+							error instanceof Error ? error.message : 'Unknown agent error',
+					});
 				} finally {
 					controller.close();
 				}
@@ -62,25 +61,21 @@ export async function POST(request: NextRequest) {
 			},
 		});
 	} catch (error) {
-		console.error('Agent API error:', error);
-
-		const errorMsg = error instanceof Error ? error.message : 'Unknown error';
 		return NextResponse.json(
 			{
 				success: false,
-				error: errorMsg,
+				error: error instanceof Error ? error.message : 'Unknown error',
 			},
 			{ status: 500 },
 		);
 	}
 }
 
-// GET for health check
 export async function GET() {
 	return NextResponse.json({
 		status: 'ok',
 		message: 'Agent API is running',
-		supportedIntents: ['earn', 'bridge', 'monitor'],
-		version: '1.0.0',
+		supportedIntents: ['earn'],
+		version: '2.0.0',
 	});
 }

@@ -1,230 +1,147 @@
-/**
- * Main Agent - Intent Router
- * 职责：理解用户意图，分类后转发给对应的 Sub-Agent
- */
-
 import { generateText } from 'ai';
 import { getAgentConfig } from '@/lib/agentConfig';
 import { getModelFromConfig } from '@/lib/agentClient';
-import { earningAgent, earningAgentStream } from './earning';
+import {
+	buildPlannerFallback,
+	detectIntentFromMessage,
+	extractPlannerPayload,
+	type PlannerOutput,
+	type SupportedWalletChainId,
+} from '@/lib/plannerRuntime';
+import { earningAgentStream, type EarningStreamChunk } from './earning';
 
-interface MainAgentInput {
+type MainAgentInput = {
 	userMessage: string;
 	userAddress: string;
-	chainId?: number;
-}
-
-interface MainAgentOutput {
-	intent: 'earn' | 'bridge' | 'monitor' | 'unknown';
-	chainId: number;
-	response: string;
-}
+	walletChainId: number;
+	messages: Array<{ role: 'user' | 'ai'; content: string }>;
+};
 
 export type MainAgentStreamChunk =
 	| { type: 'thinking'; content: string }
 	| { type: 'response'; content: string }
 	| { type: 'error'; content: string }
+	| { type: 'plan'; plan: PlannerOutput }
+	| EarningStreamChunk
 	| {
 			type: 'done';
 			intent: 'earn' | 'bridge' | 'monitor' | 'unknown';
 			chainId: number;
 	  };
 
-export async function mainAgent(
-	input: MainAgentInput,
-): Promise<MainAgentOutput> {
-	const { userMessage, userAddress, chainId = 8453 } = input; // 默认 Base 链
+function buildPlannerPrompt(input: MainAgentInput): string {
+	const history = input.messages
+		.slice(-6)
+		.map((message) => `${message.role}: ${message.content}`)
+		.join('\n');
 
-	// Step 1: 意图识别
-	const intentConfig = getAgentConfig('main');
-	const intentModel = getModelFromConfig(intentConfig);
+	return [
+		`Wallet chain: ${input.walletChainId}`,
+		`Current message: ${input.userMessage}`,
+		history ? `Recent messages:\n${history}` : '',
+	].filter(Boolean).join('\n\n');
+}
 
-	const intentSystemPrompt = `你是一个智能的意图识别器（Intent Router）。
-你需要理解用户在 DeFi 收益和跨链转账中的真实意图。
-
-可能的意图包括：
-1. earn - 用户想要存入资产到收益 vault，赚取收益
-   关键词：存、deposit、yield、earn、赚、收益、vault、最高、安全
-2. bridge - 用户想要跨链转账
-   关键词：转、转账、bridge、swap、跨链、从...到..., from...to...
-3. monitor - 用户想查询仓位、收益、账户状态
-   关键词：查、查询、余额、仓位、收益、怎么样、status、position
-4. unknown - 无法识别的请求
-
-你需要：
-1. 识别用户的意图（只返回上面的 4 个之一）
-2. 提取链信息（如果有提到特定的链）
-3. 严格按照以下 JSON 格式返回，不做任何其他处理：
-{
-  "intent": "earn|bridge|monitor|unknown",
-  "chainId": 8453,  // 如果用户提到链，转换为 chainId；不确定则用 8453（Base）
-  "confidence": 0.95
-}`;
-
-	const intentPrompt = `用户消息："${userMessage}"
-
-请识别意图并返回 JSON 格式的结果。`;
-
-	let recognizedIntent = 'unknown';
-	let recognizedChainId = chainId;
+async function planRequest(input: MainAgentInput): Promise<PlannerOutput> {
+	const fallback = buildPlannerFallback({
+		message: input.userMessage,
+		walletChainId: input.walletChainId,
+	});
 
 	try {
-		const intentResult = await generateText({
-			model: intentModel,
-			system: intentSystemPrompt,
-			prompt: intentPrompt,
-			temperature: 0.3,
-			maxTokens: 200,
+		const config = getAgentConfig('main');
+		const model = getModelFromConfig(config);
+		const result = await generateText({
+			model,
+			temperature: 0,
+			maxTokens: 400,
+			system: [
+				'You are the planner for a DeFi earn application.',
+				'Return JSON only.',
+				'Supported intents: earn.deposit, bridge, monitor, unknown.',
+				'Supported asset in this version: USDC.',
+				'Supported chains in this version: Ethereum(1), Base(8453), Arbitrum(42161).',
+				'Use execute mode only when the user clearly asks to proceed now.',
+				'Schema:',
+				'{"intent":"earn.deposit|bridge|monitor|unknown","asset":"USDC","amount":500,"sourceChain":1,"targetChain":8453,"minApy":5,"riskPreference":"low|medium|high","needsConfirmation":true,"mode":"recommend|execute"}',
+			].join('\n'),
+			prompt: buildPlannerPrompt(input),
 		});
 
-		// 尝试解析 JSON
-		const jsonMatch = intentResult.text.match(/\{[\s\S]*\}/);
-		if (jsonMatch) {
-			const parsed = JSON.parse(jsonMatch[0]);
-			recognizedIntent = parsed.intent || 'unknown';
-			recognizedChainId = parsed.chainId || chainId;
-		}
-	} catch (error) {
-		console.error('Intent recognition error:', error);
+		return extractPlannerPayload(result.text, input.walletChainId);
+	} catch {
+		return fallback;
+	}
+}
+
+function unsupportedIntentMessage(intent: 'bridge' | 'monitor'): string {
+	if (intent === 'bridge') {
+		return [
+			'## Bridge 暂未开放',
+			'当前版本先把 Earn 主线做稳，Bridge 会在下一阶段恢复。',
+			'你现在可以这样问：Find the best USDC vault on Base',
+		].join('\n\n');
 	}
 
-	// Step 2: 根据意图转发给子 Agent
-	let response = '';
+	return [
+		'## Monitor 暂未开放',
+		'当前版本先把 Earn 主线做稳，Monitor 会在后续阶段恢复。',
+		'你现在可以这样问：Find the best USDC vault on Arbitrum',
+	].join('\n\n');
+}
 
-	try {
-		switch (recognizedIntent) {
-			case 'earn':
-				const earningResult = await earningAgent({
-					userMessage,
-					userAddress,
-					chainId: recognizedChainId,
-				});
-				response = earningResult.response;
-				break;
-
-			case 'bridge':
-				response = `🌉 Bridge Agent (即将推出)\n\n你想要跨链转账。目前我们的 Bridge Agent 还在开发中，预计 Phase 2 上线。\n\n你可以说："把我的 USDC 从 Ethereum 转到 Base"，我会帮你找到最优的桥接路由。`;
-				break;
-
-			case 'monitor':
-				response = `📊 Monitor Agent (即将推出)\n\n你想查询仓位或收益。Monitor Agent 会在 Phase 3 上线，支持实时查询你的 Earn 收益、仓位变化等。`;
-				break;
-
-			case 'unknown':
-			default:
-				response = `我没有完全理解你的意思。😅\n\n我目前支持以下功能：\n1️⃣ **Earn** - "我想在 Base 存 500 USDC 最高收益"\n2️⃣ **Bridge** - "把 USDC 从 Ethereum 转到 Base"（开发中）\n3️⃣ **Monitor** - "我的仓位怎么样？"（开发中）\n\n请用更清楚的表述，我会尽力帮助你！`;
-				break;
-		}
-	} catch (error) {
-		const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-		response = `处理请求时出错：${errorMsg}。请重试。`;
-		recognizedIntent = 'unknown';
-	}
-
-	return {
-		intent: recognizedIntent as 'earn' | 'bridge' | 'monitor' | 'unknown',
-		chainId: recognizedChainId,
-		response,
-	};
+function unknownIntentMessage(): string {
+	return [
+		'我目前只开放了 Earn 主线。',
+		'支持链：Base、Arbitrum、Ethereum。',
+		'当前演示资产：USDC。',
+		'你可以这样问：put 500 USDC into the safest vault above 5% APY on Arbitrum',
+	].join('\n\n');
 }
 
 export async function* mainAgentStream(
 	input: MainAgentInput,
 ): AsyncGenerator<MainAgentStreamChunk> {
-	const { userMessage, userAddress, chainId = 8453 } = input;
+	yield { type: 'thinking', content: 'Planning request...\n' };
 
-	const intentConfig = getAgentConfig('main');
-	const intentModel = getModelFromConfig(intentConfig);
+	const plan = await planRequest(input);
+	const detected = detectIntentFromMessage(input.userMessage);
+	const effectiveIntent =
+		plan.intent === 'unknown' && detected.intent !== 'unknown'
+			? detected.intent
+			: plan.intent;
 
-	const intentSystemPrompt = `你是一个智能的意图识别器（Intent Router）。
-你需要理解用户在 DeFi 收益和跨链转账中的真实意图。
-
-可能的意图包括：
-1. earn - 用户想要存入资产到收益 vault，赚取收益
-2. bridge - 用户想要跨链转账
-3. monitor - 用户想查询仓位、收益、账户状态
-4. unknown - 无法识别的请求
-
-严格返回 JSON：
-{
-  "intent": "earn|bridge|monitor|unknown",
-  "chainId": 8453,
-  "confidence": 0.95
-}`;
-
-	const intentPrompt = `用户消息："${userMessage}"\n\n请识别意图并返回 JSON。`;
-
-	let recognizedIntent: 'earn' | 'bridge' | 'monitor' | 'unknown' = 'unknown';
-	let recognizedChainId = chainId;
-
-	try {
-		const intentResult = await generateText({
-			model: intentModel,
-			system: intentSystemPrompt,
-			prompt: intentPrompt,
-			temperature: 0.3,
-			maxTokens: 200,
-		});
-
-		const jsonMatch = intentResult.text.match(/\{[\s\S]*\}/);
-		if (jsonMatch) {
-			const parsed = JSON.parse(jsonMatch[0]);
-			recognizedIntent =
-				(parsed.intent as 'earn' | 'bridge' | 'monitor' | 'unknown') ||
-				'unknown';
-			recognizedChainId = parsed.chainId || chainId;
+	if (effectiveIntent === 'earn.deposit') {
+		for await (const chunk of earningAgentStream({
+			userMessage: input.userMessage,
+			userAddress: input.userAddress,
+			plan,
+		})) {
+			yield chunk;
 		}
-	} catch {
-		yield { type: 'thinking', content: '意图识别失败，按通用模式处理。\n' };
+
+		yield {
+			type: 'done',
+			intent: 'earn',
+			chainId: plan.targetChain as SupportedWalletChainId,
+		};
+		return;
 	}
 
-	yield {
-		type: 'thinking',
-		content: `Intent: ${recognizedIntent} | Chain: ${recognizedChainId}\n`,
-	};
-
-	try {
-		switch (recognizedIntent) {
-			case 'earn':
-				for await (const chunk of earningAgentStream({
-					userMessage,
-					userAddress,
-					chainId: recognizedChainId,
-				})) {
-					yield chunk;
-				}
-				break;
-			case 'bridge':
-				yield {
-					type: 'response',
-					content:
-						'🌉 Bridge Agent (即将推出)\n\n你想要跨链转账。目前我们的 Bridge Agent 还在开发中，预计 Phase 2 上线。',
-				};
-				break;
-			case 'monitor':
-				yield {
-					type: 'response',
-					content:
-						'📊 Monitor Agent (即将推出)\n\n你想查询仓位或收益。Monitor Agent 会在 Phase 3 上线。',
-				};
-				break;
-			case 'unknown':
-			default:
-				yield {
-					type: 'response',
-					content:
-						'我没有完全理解你的意思。你可以尝试：\n1) Earn: 我想在 Base 存 500 USDC 最高收益\n2) Bridge: 把 USDC 从 Ethereum 转到 Base',
-				};
-				break;
-		}
-	} catch (error) {
-		const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-		yield { type: 'error', content: `处理请求时出错：${errorMsg}` };
+	if (effectiveIntent === 'bridge' || effectiveIntent === 'monitor') {
+		yield { type: 'response', content: unsupportedIntentMessage(effectiveIntent) };
+		yield {
+			type: 'done',
+			intent: effectiveIntent,
+			chainId: plan.targetChain,
+		};
+		return;
 	}
 
+	yield { type: 'response', content: unknownIntentMessage() };
 	yield {
 		type: 'done',
-		intent: recognizedIntent,
-		chainId: recognizedChainId,
+		intent: 'unknown',
+		chainId: plan.targetChain,
 	};
 }
