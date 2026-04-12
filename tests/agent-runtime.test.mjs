@@ -66,3 +66,40 @@ test('getQwenBaseUrl prefers explicit QWEN_BASE_URL and otherwise uses the offic
 		DEFAULT_QWEN_BASE_URL,
 	);
 });
+
+test('normalizeAgentRequest accepts messages and walletChainId when present', async () => {
+	const { normalizeAgentRequest } = await loadAgentRuntimeModule();
+
+	const result = normalizeAgentRequest({
+		message: 'find the best vault on Arbitrum',
+		userAddress: '0x1111111111111111111111111111111111111111',
+		walletChainId: 42161,
+		messages: [
+			{ role: 'user', content: 'find vaults' },
+			{ role: 'ai', content: 'here are top picks' },
+		],
+	});
+
+	assert.equal(result.ok, true);
+	assert.equal(result.value.chainId, 42161);
+	assert.equal(result.value.walletChainId, 42161);
+	assert.deepEqual(result.value.messages, [
+		{ role: 'user', content: 'find vaults' },
+		{ role: 'ai', content: 'here are top picks' },
+	]);
+});
+
+test('normalizeAgentRequest tolerates empty messages array and falls back to chainId', async () => {
+	const { normalizeAgentRequest } = await loadAgentRuntimeModule();
+
+	const result = normalizeAgentRequest({
+		message: 'find vaults',
+		userAddress: '0x1111111111111111111111111111111111111111',
+		chainId: 8453,
+		messages: [],
+	});
+
+	assert.equal(result.ok, true);
+	assert.equal(result.value.walletChainId, 8453);
+	assert.deepEqual(result.value.messages, []);
+});

@@ -6,6 +6,8 @@ type AgentRequestBody = {
 	message?: unknown;
 	userAddress?: unknown;
 	chainId?: unknown;
+	walletChainId?: unknown;
+	messages?: unknown;
 };
 
 type AgentRequestSuccess = {
@@ -14,6 +16,11 @@ type AgentRequestSuccess = {
 		message: string;
 		userAddress: string;
 		chainId: number;
+		walletChainId: number;
+		messages: Array<{
+			role: 'user' | 'ai';
+			content: string;
+		}>;
 	};
 };
 
@@ -45,10 +52,46 @@ export function normalizeAgentRequest(
 		};
 	}
 
-	const chainId =
+	const explicitChainId =
 		typeof body?.chainId === 'number' && Number.isFinite(body.chainId)
 			? body.chainId
-			: DEFAULT_CHAIN_ID;
+			: null;
+
+	const walletChainId =
+		typeof body?.walletChainId === 'number' &&
+		Number.isFinite(body.walletChainId)
+			? body.walletChainId
+			: explicitChainId ?? DEFAULT_CHAIN_ID;
+
+	const chainId = explicitChainId ?? walletChainId;
+
+	const messages = Array.isArray(body?.messages)
+		? body.messages
+				.map((item) => {
+					if (
+						item &&
+						typeof item === 'object' &&
+						(((item as { role?: unknown }).role === 'user') ||
+							(item as { role?: unknown }).role === 'ai') &&
+						typeof (item as { content?: unknown }).content === 'string'
+					) {
+						return {
+							role: (item as { role: 'user' | 'ai' }).role,
+							content: (item as { content: string }).content.trim(),
+						};
+					}
+
+					return null;
+				})
+				.filter(
+					(
+						item,
+					): item is {
+						role: 'user' | 'ai';
+						content: string;
+					} => Boolean(item && item.content),
+				)
+		: [];
 
 	return {
 		ok: true,
@@ -56,6 +99,8 @@ export function normalizeAgentRequest(
 			message,
 			userAddress,
 			chainId,
+			walletChainId,
+			messages,
 		},
 	};
 }
