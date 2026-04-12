@@ -6,7 +6,10 @@ import {
 	searchVaults,
 	selectRecommendedVault,
 } from '@/lib/lifiDomain';
-import type { NormalizedVaultCandidate } from '@/lib/lifiRuntime';
+import {
+	buildVaultDisplayName,
+	type NormalizedVaultCandidate,
+} from '@/lib/lifiRuntime';
 import type { PlannerOutput } from '@/lib/plannerRuntime';
 import { SUPPORTED_CHAINS } from '@/lib/chains';
 
@@ -105,7 +108,12 @@ export async function* earningAgentStream(
 
 	const executionPreview = buildExecutionPreview({
 		plan: input.plan,
-		selectedVault: recommendation.selectedVault,
+		selectedVault: {
+			address: recommendation.selectedVault.address,
+			name: recommendation.selectedVault.name,
+			displayName: buildVaultDisplayName(recommendation.selectedVault),
+			dataSource: recommendation.selectedVault.dataSource,
+		},
 		quote: quotePayload as {
 			estimate?: {
 				toAmount?: string;

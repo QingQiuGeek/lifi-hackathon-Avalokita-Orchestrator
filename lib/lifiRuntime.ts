@@ -119,6 +119,34 @@ function normalizeVaultRecord(rawVault: RawVaultRecord): NormalizedVaultCandidat
 	};
 }
 
+export function buildVaultDisplayName(input: {
+	name: string;
+	protocolName: string;
+	underlyingSymbol: string;
+}): string {
+	const normalizedName = input.name.trim();
+	const normalizedProtocol = input.protocolName.trim();
+	const normalizedUnderlying = input.underlyingSymbol.trim().toUpperCase();
+
+	if (
+		normalizedName &&
+		normalizedName !== 'Unknown' &&
+		normalizedName.toUpperCase() !== normalizedUnderlying
+	) {
+		return normalizedName;
+	}
+
+	if (normalizedUnderlying && normalizedProtocol && normalizedProtocol !== 'unknown') {
+		return `${normalizedUnderlying} vault on ${normalizedProtocol}`;
+	}
+
+	if (normalizedUnderlying) {
+		return `${normalizedUnderlying} vault`;
+	}
+
+	return normalizedName || 'Unknown vault';
+}
+
 export function normalizeVaultListResponse(
 	raw: unknown,
 ): VaultListSuccess | VaultListFailure {
@@ -267,8 +295,9 @@ export function buildRecommendationSummary(input: {
 	}
 
 	if (input.selectedVault) {
+		const displayName = buildVaultDisplayName(input.selectedVault);
 		lines.push(
-			`Recommendation: ${input.selectedVault.name} by ${input.selectedVault.protocolName} on ${input.chainName}`,
+			`Recommendation: ${displayName} on ${input.chainName}`,
 		);
 		lines.push(
 			`APY: ${input.selectedVault.apyTotal.toFixed(2)}% | TVL: $${input.selectedVault.tvlUsd.toLocaleString(
@@ -282,8 +311,9 @@ export function buildRecommendationSummary(input: {
 	if (input.alternatives.length > 0) {
 		lines.push('Alternatives:');
 		for (const vault of input.alternatives) {
+			const displayName = buildVaultDisplayName(vault);
 			lines.push(
-				`- ${vault.name} (${vault.protocolName}) ${vault.apyTotal.toFixed(2)}% APY`,
+				`- ${displayName} (${vault.protocolName}) ${vault.apyTotal.toFixed(2)}% APY`,
 			);
 		}
 	}

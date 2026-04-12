@@ -30,6 +30,7 @@ type PreviewInput = {
 	selectedVault: {
 		address: string;
 		name: string;
+		displayName?: string;
 		dataSource: 'live' | 'fallback';
 	};
 	quote: {
@@ -43,6 +44,10 @@ type PreviewInput = {
 	} | null;
 };
 
+function hasValidAmount(amount: number | null): amount is number {
+	return typeof amount === 'number' && Number.isFinite(amount) && amount > 0;
+}
+
 function sumUsdFees(feeCosts: Array<{ amountUSD?: string }> = []): string {
 	const total = feeCosts.reduce((sum, item) => {
 		const value = Number(item.amountUSD ?? 0);
@@ -53,7 +58,7 @@ function sumUsdFees(feeCosts: Array<{ amountUSD?: string }> = []): string {
 }
 
 export function buildExecutionPreview(input: PreviewInput): ExecutionPreview {
-	if (input.plan.amount == null) {
+	if (!hasValidAmount(input.plan.amount)) {
 		return {
 			canExecute: false,
 			blockingReason:
@@ -63,7 +68,7 @@ export function buildExecutionPreview(input: PreviewInput): ExecutionPreview {
 			toChain: input.plan.targetChain,
 			fromToken: input.plan.asset,
 			fromAmount: null,
-			targetVault: input.selectedVault.name,
+			targetVault: input.selectedVault.displayName ?? input.selectedVault.name,
 			targetVaultAddress: input.selectedVault.address,
 			estimatedReceived: null,
 			minimumReceived: null,
@@ -84,7 +89,7 @@ export function buildExecutionPreview(input: PreviewInput): ExecutionPreview {
 		toChain: input.plan.targetChain,
 		fromToken: input.plan.asset,
 		fromAmount: String(input.plan.amount),
-		targetVault: input.selectedVault.name,
+		targetVault: input.selectedVault.displayName ?? input.selectedVault.name,
 		targetVaultAddress: input.selectedVault.address,
 		estimatedReceived: input.quote?.estimate?.toAmount ?? null,
 		minimumReceived: input.quote?.estimate?.toAmountMin ?? null,

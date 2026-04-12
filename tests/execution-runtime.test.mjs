@@ -59,6 +59,43 @@ test('buildExecutionPreview requires amount before execution can proceed', async
 	assert.match(preview.blockingReason ?? '', /amount/i);
 });
 
+test('buildExecutionPreview treats zero amount as missing input instead of quote failure', async () => {
+	const { buildExecutionPreview } = await loadExecutionRuntimeModule();
+
+	const preview = buildExecutionPreview({
+		plan: {
+			intent: 'earn.deposit',
+			asset: 'USDC',
+			amount: 0,
+			sourceChain: 8453,
+			targetChain: 8453,
+			minApy: 5,
+			riskPreference: 'medium',
+			needsConfirmation: true,
+			mode: 'recommend',
+		},
+		selectedVault: {
+			address: '0xvault',
+			chainId: 8453,
+			name: 'USDC',
+			protocolName: 'yo-protocol',
+			underlyingSymbol: 'USDC',
+			underlyingTokenAddress: '0xusdc',
+			apyTotal: 16.47,
+			tvlUsd: 27681375,
+			tags: ['stablecoin'],
+			isTransactional: true,
+			isRedeemable: true,
+			dataSource: 'live',
+		},
+		quote: null,
+	});
+
+	assert.equal(preview.canExecute, false);
+	assert.equal(preview.fromAmount, null);
+	assert.match(preview.blockingReason ?? '', /amount/i);
+});
+
 test('buildExecutionPreview summarizes quote values for live execution', async () => {
 	const { buildExecutionPreview } = await loadExecutionRuntimeModule();
 

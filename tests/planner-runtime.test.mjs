@@ -88,3 +88,19 @@ test('extractPlannerPayload accepts valid JSON planner output and normalizes cha
 	assert.equal(plan.targetChain, 42161);
 	assert.equal(plan.mode, 'execute');
 });
+
+test('extractPlannerPayload treats zero or negative amounts as missing', async () => {
+	const { extractPlannerPayload } = await loadPlannerRuntimeModule();
+
+	const zeroAmountPlan = extractPlannerPayload(
+		'{"intent":"earn.deposit","asset":"USDC","amount":0,"sourceChain":8453,"targetChain":8453,"minApy":5,"riskPreference":"medium","needsConfirmation":true,"mode":"recommend"}',
+		8453,
+	);
+	const negativeAmountPlan = extractPlannerPayload(
+		'{"intent":"earn.deposit","asset":"USDC","amount":-10,"sourceChain":8453,"targetChain":8453,"minApy":5,"riskPreference":"medium","needsConfirmation":true,"mode":"recommend"}',
+		8453,
+	);
+
+	assert.equal(zeroAmountPlan.amount, null);
+	assert.equal(negativeAmountPlan.amount, null);
+});

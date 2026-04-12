@@ -146,3 +146,25 @@ test('buildRecommendationSummary marks fallback output explicitly', async () => 
 	assert.match(text, /Source: fallback/i);
 	assert.match(text, /Live vault list was unavailable/i);
 });
+
+test('buildVaultDisplayName expands generic underlying-only vault names', async () => {
+	const { buildVaultDisplayName } = await loadLifiRuntimeModule();
+
+	assert.equal(
+		buildVaultDisplayName({
+			name: 'USDC',
+			protocolName: 'yo-protocol',
+			underlyingSymbol: 'USDC',
+		}),
+		'USDC vault on yo-protocol',
+	);
+
+	assert.equal(
+		buildVaultDisplayName({
+			name: 'RE7USDC',
+			protocolName: 'morpho-v1',
+			underlyingSymbol: 'USDC',
+		}),
+		'RE7USDC',
+	);
+});

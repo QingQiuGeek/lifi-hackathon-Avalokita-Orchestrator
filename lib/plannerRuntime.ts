@@ -19,14 +19,22 @@ export type PlannerOutput = {
 	mode: PlannerMode;
 };
 
+function normalizeAmount(value: unknown): number | null {
+	const amount = Number(value);
+	if (!Number.isFinite(amount) || amount <= 0) {
+		return null;
+	}
+
+	return amount;
+}
+
 function parseAmount(message: string): number | null {
 	const match = message.match(/\b(\d[\d,]*\.?\d*)\s*usdc\b/i);
 	if (!match) {
 		return null;
 	}
 
-	const amount = Number(match[1].replace(/,/g, ''));
-	return Number.isFinite(amount) ? amount : null;
+	return normalizeAmount(match[1].replace(/,/g, ''));
 }
 
 function parseMinApy(message: string): number | null {
@@ -229,10 +237,7 @@ export function extractPlannerPayload(
 		return {
 			intent,
 			asset: 'USDC',
-			amount:
-				typeof parsed.amount === 'number' && Number.isFinite(parsed.amount)
-					? parsed.amount
-					: null,
+			amount: normalizeAmount(parsed.amount),
 			sourceChain,
 			targetChain,
 			minApy:

@@ -43,7 +43,7 @@ export default function ExecutionPreviewCard({
 		<div className='mt-3 rounded-2xl border border-black/10 bg-black/[0.03] p-4 text-sm'>
 			<div className='font-semibold text-black'>Execution Preview</div>
 			<div className='mt-3 grid gap-2 text-black/80'>
-				<div>Selected vault: {selectedVault?.name ?? preview.targetVault}</div>
+				<div>Selected vault: {preview.targetVault}</div>
 				<div>Protocol: {selectedVault?.protocolName ?? 'Unknown'}</div>
 				<div>
 					Route: {chainLabel(preview.fromChain)} {'->'}{' '}
