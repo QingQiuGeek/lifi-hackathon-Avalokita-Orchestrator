@@ -1,6 +1,7 @@
 /**
- * Per-Agent 模型配置
- * 每个 Agent 可以使用不同的模型（通过环境变量控制）
+ * Per-agent model configuration.
+ * Supports explicit provider/model values while remaining compatible with
+ * legacy single-string model names already used in this project.
  */
 
 export type SupportedModel =
@@ -8,6 +9,8 @@ export type SupportedModel =
 	| 'zhipu'
 	| 'openai'
 	| 'anthropic'
+	| 'moonshotai'
+	| 'alibaba'
 	| 'qwen';
 
 export interface AgentModelConfig {
@@ -62,10 +65,6 @@ const DEFAULT_CONFIGS: Record<string, AgentModelConfig> = {
 	},
 };
 
-/**
- * 获取指定 Agent 的模型配置
- * 支持通过环境变量覆盖默认配置
- */
 export function getAgentConfig(
 	agentName: keyof typeof DEFAULT_CONFIGS,
 ): AgentModelConfig {
@@ -73,22 +72,27 @@ export function getAgentConfig(
 	const envModel = process.env[envKey];
 
 	if (envModel) {
-		// 如果环境变量指定了模型，解析它
 		return parseModelString(envModel, agentName);
 	}
 
 	return DEFAULT_CONFIGS[agentName];
 }
 
-/**
- * 解析 "provider:model" 格式的模型字符串
- * 例如：deepseek:deepseek-chat 或直接 glm-4（会自动识别提供商）
- */
 function parseModelString(
 	modelString: string,
 	agentName: string,
 ): AgentModelConfig {
 	const base = DEFAULT_CONFIGS[agentName];
+
+	if (modelString.includes('/')) {
+		const [provider, model] = modelString.split('/');
+		return {
+			...base,
+			model,
+			provider: provider as SupportedModel,
+			apiKeyEnv: getApiKeyEnvName(provider as SupportedModel),
+		};
+	}
 
 	if (modelString.includes(':')) {
 		const [provider, model] = modelString.split(':');
@@ -96,35 +100,43 @@ function parseModelString(
 			...base,
 			model,
 			provider: provider as SupportedModel,
+			apiKeyEnv: getApiKeyEnvName(provider as SupportedModel),
 		};
 	}
 
-	// 自动识别提供商
 	let provider: SupportedModel = 'deepseek';
 	if (modelString.startsWith('gpt-')) provider = 'openai';
 	else if (modelString.includes('glm')) provider = 'zhipu';
 	else if (modelString.startsWith('claude')) provider = 'anthropic';
 	else if (modelString.startsWith('qwen')) provider = 'qwen';
+	else if (modelString.startsWith('kimi') || modelString.startsWith('moonshot'))
+		provider = 'moonshotai';
+	else if (modelString.startsWith('qvq') || modelString.startsWith('qwen-max'))
+		provider = 'alibaba';
 	else if (modelString.startsWith('deepseek')) provider = 'deepseek';
 
 	return {
 		...base,
 		model: modelString,
 		provider,
+		apiKeyEnv: getApiKeyEnvName(provider),
 	};
 }
 
-/**
- * 验证 API Key 是否存在
- */
-export function validateApiKey(provider: SupportedModel): boolean {
+function getApiKeyEnvName(provider: SupportedModel): string {
 	const keyMap: Record<SupportedModel, string> = {
 		deepseek: 'DEEPSEEK_API_KEY',
 		zhipu: 'ZHIPU_API_KEY',
 		openai: 'OPENAI_API_KEY',
 		anthropic: 'ANTHROPIC_API_KEY',
+		moonshotai: 'MOONSHOTAI_API_KEY',
+		alibaba: 'ALIBABA_API_KEY',
 		qwen: 'QWEN_API_KEY',
 	};
 
-	return !!process.env[keyMap[provider]];
+	return keyMap[provider];
+}
+
+export function validateApiKey(provider: SupportedModel): boolean {
+	return !!process.env[getApiKeyEnvName(provider)];
 }

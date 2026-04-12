@@ -1,16 +1,22 @@
 /**
- * AI SDK Client 工厂函数
- * 支持多个模型提供商，根据配置动态初始化
+ * AI SDK client factory.
+ * Supports multiple model providers while keeping the existing Qwen path.
  */
 
 import { LanguageModel } from 'ai';
 import { createOpenAI, openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
+import { deepseek } from '@ai-sdk/deepseek';
+import { alibaba } from '@ai-sdk/alibaba';
+import { moonshotai } from '@ai-sdk/moonshotai';
+import { zhipu } from 'zhipu-ai-provider';
 import type { AgentModelConfig, SupportedModel } from './agentConfig';
+import { getQwenBaseUrl } from './agentRuntime';
 
-/**
- * 根据配置获取对应的语言模型实例
- */
+function asLanguageModel(model: unknown): LanguageModel {
+	return model as LanguageModel;
+}
+
 export function getModelFromConfig(config: AgentModelConfig): LanguageModel {
 	const { provider, model } = config;
 
@@ -19,6 +25,8 @@ export function getModelFromConfig(config: AgentModelConfig): LanguageModel {
 		zhipu: process.env.ZHIPU_API_KEY,
 		openai: process.env.OPENAI_API_KEY,
 		anthropic: process.env.ANTHROPIC_API_KEY,
+		moonshotai: process.env.MOONSHOTAI_API_KEY,
+		alibaba: process.env.ALIBABA_API_KEY,
 		qwen: process.env.QWEN_API_KEY,
 	};
 
@@ -31,29 +39,31 @@ export function getModelFromConfig(config: AgentModelConfig): LanguageModel {
 
 	switch (provider) {
 		case 'openai':
-			return openai(model as any);
+			return asLanguageModel(openai(model));
 		case 'anthropic':
-			return anthropic(model as any);
+			return asLanguageModel(anthropic(model));
+		case 'deepseek':
+			return asLanguageModel(deepseek(model));
+		case 'alibaba':
+			return asLanguageModel(alibaba(model));
+		case 'zhipu':
+			return asLanguageModel(zhipu(model));
+		case 'moonshotai':
+			return asLanguageModel(moonshotai(model));
 		case 'qwen': {
 			const qwen = createOpenAI({
 				apiKey,
-				baseURL:
-					process.env.QWEN_BASE_URL ||
-					'https://dashscope.aliyuncs.com/compatible-mode/v1',
+				baseURL: getQwenBaseUrl(),
 			});
-			return qwen(model as any);
+			return asLanguageModel(qwen(model));
 		}
 		default:
-			// Fallback for deepseek and zhipu - use openai as default
-			console.warn(`${provider} not available, falling back to OpenAI`);
-			return openai('gpt-4-turbo' as any);
+			throw new Error(
+				`Provider ${provider} not available, please check config model`,
+			);
 	}
 }
 
-/**
- * 创建带有 fallback 的模型链
- * 如果主模型失败，自动切换到备用模型
- */
 export function createModelWithFallback(
 	primaryConfig: AgentModelConfig,
 	fallbackConfig?: AgentModelConfig,

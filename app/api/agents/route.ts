@@ -1,9 +1,10 @@
 /**
  * API Route: POST /api/agents
- * 主入口点，接收用户消息并调用 MainAgent
+ * 涓诲叆鍙ｇ偣锛屾帴鏀剁敤鎴锋秷鎭苟璋冪敤 MainAgent
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { normalizeAgentRequest } from '@/lib/agentRuntime';
 import { mainAgentStream } from './agents/main';
 
 export const runtime = 'nodejs';
@@ -11,19 +12,19 @@ export const runtime = 'nodejs';
 export async function POST(request: NextRequest) {
 	try {
 		const body = await request.json();
-		const { message, userAddress, chainId } = body;
+		const normalizedRequest = normalizeAgentRequest(body);
 
-		// 验证必需字段
-		if (!message || !userAddress) {
+		if (!normalizedRequest.ok) {
 			return NextResponse.json(
 				{
 					success: false,
-					error: 'Missing required fields: message, userAddress',
+					error: normalizedRequest.error,
 				},
 				{ status: 400 },
 			);
 		}
 
+		const { message, userAddress, chainId } = normalizedRequest.value;
 		const encoder = new TextEncoder();
 
 		const stream = new ReadableStream({
@@ -38,7 +39,7 @@ export async function POST(request: NextRequest) {
 					for await (const chunk of mainAgentStream({
 						userMessage: message,
 						userAddress,
-						chainId: chainId || 8453,
+						chainId,
 					})) {
 						send(chunk);
 					}

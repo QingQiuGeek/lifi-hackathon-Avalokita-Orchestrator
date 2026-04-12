@@ -6,6 +6,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Actions, Bubble, Think } from '@ant-design/x';
 import type { ActionsProps, BubbleItemType } from '@ant-design/x';
 import { Avatar } from 'antd';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useAccount } from 'wagmi';
 import { useConnectModal } from '@rainbow-me/rainbowkit';
 import favicon from '../app/favicon.ico';
@@ -103,6 +105,81 @@ export default function ChatContent() {
 	const messageIdRef = useRef(0);
 	const activeStreamTokenRef = useRef(0);
 	const hasUserMessageRef = useRef(false);
+
+	const renderMarkdownContent = useCallback((text: string) => {
+		if (!text) return null;
+
+		return (
+			<div className='chat-markdown whitespace-normal break-words text-sm leading-6'>
+				<ReactMarkdown
+					remarkPlugins={[remarkGfm]}
+					components={{
+						p: ({ children }) => <p className='mb-2 last:mb-0'>{children}</p>,
+						strong: ({ children }) => (
+							<strong className='font-semibold'>{children}</strong>
+						),
+						em: ({ children }) => <em className='italic'>{children}</em>,
+						ul: ({ children }) => (
+							<ul className='mb-2 list-disc pl-5'>{children}</ul>
+						),
+						ol: ({ children }) => (
+							<ol className='mb-2 list-decimal pl-5'>{children}</ol>
+						),
+						li: ({ children }) => <li className='mb-1'>{children}</li>,
+						code: ({ children, className }) =>
+							className ? (
+								<code className='block overflow-x-auto rounded-xl bg-black/5 p-3 font-mono text-xs leading-5'>
+									{children}
+								</code>
+							) : (
+								<code className='rounded bg-black/5 px-1 py-0.5 font-mono text-[0.9em]'>
+									{children}
+								</code>
+							),
+						table: ({ children }) => (
+							<div className='my-3 overflow-x-auto rounded-xl border border-black/10'>
+								<table className='w-full border-collapse text-left text-sm'>
+									{children}
+								</table>
+							</div>
+						),
+						thead: ({ children }) => (
+							<thead className='bg-black/5'>{children}</thead>
+						),
+						th: ({ children }) => (
+							<th className='border-b border-black/10 px-3 py-2 font-semibold'>
+								{children}
+							</th>
+						),
+						td: ({ children }) => (
+							<td className='border-b border-black/10 px-3 py-2 align-top'>
+								{children}
+							</td>
+						),
+						blockquote: ({ children }) => (
+							<blockquote className='border-l-4 border-black/10 pl-3 italic text-black/70'>
+								{children}
+							</blockquote>
+						),
+					}}
+				>
+					{text}
+				</ReactMarkdown>
+			</div>
+		);
+	}, []);
+
+	const bubbleItems = useMemo<BubbleItemType[]>(
+		() =>
+			messages.map((message) => ({
+				...message,
+				content:
+					message.role === 'ai'
+						? renderMarkdownContent(message.content)
+						: message.content,
+			})),
+		[messages, renderMarkdownContent],
+	);
 
 	const scrollToLatest = useCallback((behavior: ScrollBehavior = 'auto') => {
 		const container = conversationRef.current;
@@ -576,7 +653,7 @@ export default function ChatContent() {
 						}}
 					>
 						<Bubble.List
-							items={messages}
+							items={bubbleItems}
 							autoScroll={false}
 							role={bubbleRole}
 						/>

@@ -3,7 +3,7 @@
  * 职责：推荐最优 vault，计算预期收益
  */
 
-import { generateText, ToolResult } from 'ai';
+import { generateText } from 'ai';
 import { streamText } from 'ai';
 import { getAgentConfig } from '@/lib/agentConfig';
 import { getModelFromConfig } from '@/lib/agentClient';
@@ -19,8 +19,19 @@ interface EarningAgentInput {
 interface EarningAgentOutput {
 	intent: 'earn';
 	response: string;
-	vaults?: any[];
-	selectedVault?: any;
+	vaults?: EarningVaultSummary[];
+	selectedVault?: EarningVaultSummary;
+}
+
+interface EarningVaultSummary {
+	address: string;
+	name: string;
+	protocol: string;
+	apy: string;
+	tvl: number | string;
+	underlyingTokens: string[];
+	tags?: string[];
+	openForDeposits?: boolean;
 }
 
 export type EarningStreamChunk =

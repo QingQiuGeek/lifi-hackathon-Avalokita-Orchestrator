@@ -9,6 +9,17 @@ import { z } from 'zod';
 const LIFI_API_BASE = 'https://earn.li.fi';
 const LIFI_COMPOSER_API = 'https://li.quest/v1/quote';
 
+interface VaultListItem {
+	address: string;
+	name: string;
+	protocol: string;
+	apy: string;
+	tvl: number | string;
+	underlyingTokens: string[];
+	tags?: string[];
+	openForDeposits?: boolean;
+}
+
 // ============ Earn Data Tools ============
 
 export const listVaultsTool = tool({
@@ -34,25 +45,25 @@ export const listVaultsTool = tool({
 			const response = await fetch(`${LIFI_API_BASE}/v1/earn/vaults?${params}`);
 			if (!response.ok) throw new Error(`API error: ${response.status}`);
 
-			const vaults = await response.json();
+			const vaults = (await response.json()) as VaultListItem[];
 
 			// Filter by minApy if provided
 			const filtered = minApy
-				? vaults.filter((v: any) => parseFloat(v.apy) >= minApy)
+				? vaults.filter((vault) => parseFloat(vault.apy) >= minApy)
 				: vaults;
 
 			return {
 				success: true,
 				count: filtered.length,
-				vaults: filtered.slice(0, limit).map((v: any) => ({
-					address: v.address,
-					name: v.name,
-					protocol: v.protocol,
-					apy: parseFloat(v.apy).toFixed(2),
-					tvl: v.tvl,
-					underlyingTokens: v.underlyingTokens,
-					tags: v.tags || [],
-					openForDeposits: v.openForDeposits,
+				vaults: filtered.slice(0, limit).map((vault) => ({
+					address: vault.address,
+					name: vault.name,
+					protocol: vault.protocol,
+					apy: parseFloat(vault.apy).toFixed(2),
+					tvl: vault.tvl,
+					underlyingTokens: vault.underlyingTokens,
+					tags: vault.tags || [],
+					openForDeposits: vault.openForDeposits,
 				})),
 			};
 		} catch (error) {
