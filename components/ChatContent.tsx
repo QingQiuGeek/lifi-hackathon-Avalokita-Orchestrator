@@ -24,6 +24,7 @@ import {
 	CHAT_FIRST_USER_MESSAGE_EVENT,
 	SIDEBAR_ACTIVE_CONVERSATION_EVENT,
 	SIDEBAR_NEW_CONVERSATION_EVENT,
+	SIDEBAR_REQUEST_NEW_CONVERSATION_EVENT,
 	type SidebarActiveConversationDetail,
 	type SidebarNewConversationDetail,
 } from './chatEvents';
@@ -400,6 +401,11 @@ export default function ChatContent() {
 			if (generating) return;
 
 			if (!hasUserMessageRef.current) {
+				window.dispatchEvent(
+					new CustomEvent(SIDEBAR_REQUEST_NEW_CONVERSATION_EVENT, {
+						detail: { source: 'composer' },
+					}),
+				);
 				window.dispatchEvent(
 					new CustomEvent(CHAT_FIRST_USER_MESSAGE_EVENT, {
 						detail: { text },

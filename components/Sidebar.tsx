@@ -23,16 +23,16 @@ import {
 	CHAT_FIRST_USER_MESSAGE_EVENT,
 	SIDEBAR_ACTIVE_CONVERSATION_EVENT,
 	SIDEBAR_NEW_CONVERSATION_EVENT,
+	SIDEBAR_REQUEST_NEW_CONVERSATION_EVENT,
 	type ChatFirstUserMessageDetail,
 } from './chatEvents';
 import threeBars from '@/app/three-bars.png';
-import Login from './Login';
-
-type ConversationRecord = {
-	key: string;
-	title: string;
-	createdAt: string;
-};
+import {
+	applyFirstMessageToPendingConversation,
+	createOrReusePendingConversation,
+	type ConversationRecord,
+	type PendingConversationRecord,
+} from '@/lib/conversationRuntime';
 
 const INITIAL_CONVERSATIONS: ConversationRecord[] = [
 	{
@@ -58,18 +58,7 @@ function formatConversationTime(isoString: string) {
 	return `${year}-${month}-${day} ${hour}:${minute}`;
 }
 
-function toConversationTitle(text: string, maxLength = 28) {
-	const normalized = text.replace(/\s+/g, ' ').trim();
-	if (!normalized) {
-		return '新对话';
-	}
-	return normalized.length > maxLength
-		? `${normalized.slice(0, maxLength)}...`
-		: normalized;
-}
-
 export default function Sidebar() {
-	// 侧边栏收缩状态
 	const [isOpen, setIsOpen] = useState(true);
 	const [keyword, setKeyword] = useState('');
 	const [conversations, setConversations] = useState<ConversationRecord[]>(
@@ -79,24 +68,33 @@ export default function Sidebar() {
 		INITIAL_CONVERSATIONS[0]?.key,
 	);
 	const idRef = useRef(INITIAL_CONVERSATIONS.length + 1);
-	const pendingConversationRef = useRef<{
-		key: string;
-		createdAt: string;
-	} | null>(null);
+	const pendingConversationRef = useRef<PendingConversationRecord>(null);
+	const conversationsRef = useRef(INITIAL_CONVERSATIONS);
+
+	useEffect(() => {
+		conversationsRef.current = conversations;
+	}, [conversations]);
 
 	const createConversation = useCallback(() => {
-		const nextId = idRef.current;
-		idRef.current += 1;
 		const nowIso = new Date().toISOString();
-		const nextKey = `conv-${nextId}`;
-		pendingConversationRef.current = {
-			key: nextKey,
+		const nextKey = `conv-${idRef.current}`;
+		const result = createOrReusePendingConversation({
+			conversations: conversationsRef.current,
+			pendingConversation: pendingConversationRef.current,
+			nextKey,
 			createdAt: nowIso,
-		};
-		setActiveKey(nextKey);
+		});
+		pendingConversationRef.current = result.pendingConversation;
+		conversationsRef.current = result.conversations;
+		if (!result.reused) {
+			idRef.current += 1;
+		}
+
+		setConversations(result.conversations);
+		setActiveKey(result.activeKey);
 		window.dispatchEvent(
 			new CustomEvent(SIDEBAR_NEW_CONVERSATION_EVENT, {
-				detail: { key: nextKey },
+				detail: { key: result.activeKey },
 			}),
 		);
 	}, []);
@@ -107,28 +105,36 @@ export default function Sidebar() {
 			const text = customEvent.detail?.text?.trim();
 			if (!text) return;
 
-			const pending = pendingConversationRef.current;
-			if (!pending) return;
+			const result = applyFirstMessageToPendingConversation({
+				conversations: conversationsRef.current,
+				pendingConversation: pendingConversationRef.current,
+				text,
+			});
+			if (!result.updated) return;
 
-			const nextConversation: ConversationRecord = {
-				key: pending.key,
-				title: toConversationTitle(text),
-				createdAt: pending.createdAt,
-			};
-
-			setConversations((prev) => [nextConversation, ...prev]);
-			setActiveKey(pending.key);
-			pendingConversationRef.current = null;
+			conversationsRef.current = result.conversations;
+			setConversations(result.conversations);
+			setActiveKey(result.activeKey);
+			pendingConversationRef.current = result.pendingConversation;
 		};
 
 		window.addEventListener(CHAT_FIRST_USER_MESSAGE_EVENT, handleFirstMessage);
+		window.addEventListener(
+			SIDEBAR_REQUEST_NEW_CONVERSATION_EVENT,
+			createConversation,
+		);
+
 		return () => {
 			window.removeEventListener(
 				CHAT_FIRST_USER_MESSAGE_EVENT,
 				handleFirstMessage,
 			);
+			window.removeEventListener(
+				SIDEBAR_REQUEST_NEW_CONVERSATION_EVENT,
+				createConversation,
+			);
 		};
-	}, []);
+	}, [createConversation]);
 
 	const filteredConversations = useMemo(() => {
 		const text = keyword.trim().toLowerCase();
@@ -141,21 +147,19 @@ export default function Sidebar() {
 	}, [conversations, keyword]);
 
 	const conversationItems = useMemo<ConversationsProps['items']>(() => {
-		return filteredConversations.map((item) => {
-			return {
-				key: item.key,
-				label: (
-					<div className='flex min-w-0 flex-col py-2'>
-						<span className='text-sm font-medium truncate text-[var(--app-text)]'>
-							{item.title}
-						</span>
-						<span className='text-[11px] text-[var(--app-muted)]'>
-							{formatConversationTime(item.createdAt)}
-						</span>
-					</div>
-				),
-			};
-		});
+		return filteredConversations.map((item) => ({
+			key: item.key,
+			label: (
+				<div className='flex min-w-0 flex-col py-2'>
+					<span className='text-sm font-medium truncate text-[var(--app-text)]'>
+						{item.title}
+					</span>
+					<span className='text-[11px] text-[var(--app-muted)]'>
+						{formatConversationTime(item.createdAt)}
+					</span>
+				</div>
+			),
+		}));
 	}, [filteredConversations]);
 
 	const handleShare = useCallback(async (record: ConversationRecord) => {
@@ -177,11 +181,16 @@ export default function Sidebar() {
 	const handleDelete = useCallback((key: string) => {
 		setConversations((prev) => {
 			const nextList = prev.filter((item) => item.key !== key);
+			conversationsRef.current = nextList;
 			setActiveKey((prevActive) =>
 				prevActive === key ? nextList[0]?.key : prevActive,
 			);
 			return nextList;
 		});
+
+		if (pendingConversationRef.current?.key === key) {
+			pendingConversationRef.current = null;
+		}
 	}, []);
 
 	const conversationMenu = useCallback(
@@ -231,7 +240,6 @@ export default function Sidebar() {
 		);
 	}, []);
 
-	// 监听窗口大小变化，自动调整侧边栏状态
 	useEffect(() => {
 		const handleResize = () => {
 			if (window.innerWidth < 768) {
@@ -241,13 +249,9 @@ export default function Sidebar() {
 			}
 		};
 
-		// 初始检查
 		handleResize();
 		window.addEventListener('resize', handleResize);
-
-		// 在组件被卸载（Unmount）销毁的时候（比如跳转页面），或者下一次这个 useEffect 重新执行之前才会跑return，清除之前的事件监听，避免内存泄漏和重复绑定事件
 		return () => window.removeEventListener('resize', handleResize);
-		// [] 表示不依赖任何随时会变化的变量。函数只会在这个组件第一次挂载到页面上（Mount）时执行一次
 	}, []);
 
 	return (
@@ -260,7 +264,6 @@ export default function Sidebar() {
 			<div
 				className={`py-4 flex items-center transition-all duration-300 ${isOpen ? 'px-4 justify-between' : 'justify-center'}`}
 			>
-				{/* logo */}
 				<div
 					className={`items-center gap-2 flex-shrink-0 ${isOpen ? 'flex' : 'hidden'}`}
 				>
@@ -274,7 +277,6 @@ export default function Sidebar() {
 						OpenChat
 					</span>
 				</div>
-				{/* Toggle Button */}
 				<button
 					className='cursor-pointer w-6 h-6 text-[#a4a4a4] hover:bg-[var(--app-hover)] transition-colors '
 					onClick={() => setIsOpen(!isOpen)}
@@ -309,7 +311,6 @@ export default function Sidebar() {
 						/>
 					</div>
 					<div>
-						{/* 历史会话 */}
 						<Conversations
 							className='sidebar-conversations'
 							items={conversationItems}
