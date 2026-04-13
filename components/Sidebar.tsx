@@ -1,5 +1,6 @@
 'use client';
 
+import { motion } from 'motion/react';
 import {
 	DeleteOutlined,
 	EditOutlined,
@@ -267,14 +268,26 @@ export default function Sidebar() {
 				<div
 					className={`items-center gap-2 flex-shrink-0 ${isOpen ? 'flex' : 'hidden'}`}
 				>
-					<div className='h-8 w-8 rounded-full bg-white items-center justify-center flex'>
+					{/* <div className='h-8 w-8 rounded-full bg-white items-center justify-center flex'>
 						<Avatar
 							size={45}
 							src={favicon.src}
 						/>
-					</div>
+					</div> */}
+					<motion.div
+						whileHover={{ scale: 1.1, rotate: 360 }}
+						transition={{ duration: 0.8, ease: 'anticipate' }}
+						className='w-14 h-14 bg-[#0a192f] rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(212,175,55,0.3)] overflow-hidden border-2 border-accent-gold/50'
+					>
+						<img
+							src='https://lh3.googleusercontent.com/aida-public/AB6AXuC3YpnY9flUgdIGfJfahlZkoSL-fu3LeFRJFCVGQ5mGvPpwEM_Ptim-53e49OX06-iDuOiedUFtP9cTT7mAJRRL1G7R1GkEhjdVQOyzRrsnzyXw3MpGQslfgZBDOpxcLfBvVDhzZRrIBJj_QbrnH8iwdsEuLevyuOFl1JqTbMIXlDEWCsyd28OuMzNXroUjrdgShwSwaSG7wLjC92VXTYYvz-WTwZCfCo-VKUE3629YuH1pw1k4avmbFU36KU_viJwI_1nkorpwZoa6'
+							alt='Thousand-Hand Guanyin'
+							className='w-full h-full object-cover'
+							referrerPolicy='no-referrer'
+						/>
+					</motion.div>
 					<span className='text-xl font-semibold text-[var(--app-text)]'>
-						OpenChat
+						Avalokita
 					</span>
 				</div>
 				<button

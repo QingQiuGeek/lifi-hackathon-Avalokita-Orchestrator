@@ -1,4 +1,27 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400&family=Manrope:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import 'tailwindcss';
 @import '@heroui/styles/css';
+
+@theme {
+	--color-primary: #4c644e;
+	--color-primary-container: #8fa98f;
+	--color-secondary: #a67c00;
+	--color-secondary-fixed: #f7e382;
+	--color-surface: #fbf9f5;
+	--color-surface-container-lowest: #ffffff;
+	--color-surface-container-low: #f5f3ef;
+	--color-surface-container: #efeeea;
+	--color-surface-container-high: #eae8e4;
+	--color-on-surface: #1b1c1a;
+	--color-on-surface-variant: #434842;
+	--color-outline-variant: #c3c8bf;
+	--color-error: #ba1a1a;
+	--color-accent-gold: #d4af37;
+
+	--font-headline: 'Noto Serif', serif;
+	--font-body: 'Manrope', sans-serif;
+	--font-label: 'Plus Jakarta Sans', sans-serif;
+}
 
 /* 全局默认颜色 */
 :root {
@@ -53,7 +76,17 @@ body {
 	font-family: var(--font-inter);
 	background-color: var(--app-bg);
 	color: var(--app-text);
-	overflow: hidden;
+	overflow-x: hidden;
+	overflow-y: auto;
+}
+
+.glass-panel {
+	background: rgba(228, 226, 222, 0.6);
+	backdrop-filter: blur(12px);
+}
+
+.gold-glow {
+	box-shadow: 0 0 20px rgba(212, 175, 55, 0.2);
 }
 
 /* 兼容既有 Tailwind 字面量颜色类，确保亮色主题可读 */
