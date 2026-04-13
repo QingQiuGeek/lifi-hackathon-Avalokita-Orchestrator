@@ -1,11 +1,14 @@
 /* eslint-disable @next/next/no-img-element, react/no-unescaped-entities */
 'use client';
 
-import { type ComponentType, useState } from 'react';
+import { type ComponentType, useEffect, useState } from 'react';
+import Image from 'next/image';
 import { motion, AnimatePresence } from 'motion/react';
+import { useTheme } from 'next-themes';
+import questionIcon from '@/app/question.png';
 import Sidebar from '@/components/Sidebar';
-import Header from '@/components/Header';
 import ChatContent from '@/components/ChatContent';
+import { WalletButton } from '@/components/WalletConnect';
 import {
 	BellRing,
 	Brain,
@@ -76,6 +79,25 @@ function ShellCard({
 
 export default function Home() {
 	const [currentView, setCurrentView] = useState('dashboard');
+	const { theme, resolvedTheme, setTheme } = useTheme();
+
+	const currentTheme = theme === 'system' ? resolvedTheme : theme;
+
+	const toggleTheme = () => {
+		setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+	};
+
+	useEffect(() => {
+		if (currentTheme !== 'light' && currentTheme !== 'dark') return;
+		document.cookie = `theme=${currentTheme}; path=/; max-age=31536000`;
+		const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+		if (metaThemeColor) {
+			metaThemeColor.setAttribute(
+				'content',
+				currentTheme === 'dark' ? '#212121' : '#ffffff',
+			);
+		}
+	}, [currentTheme]);
 
 	return (
 		<div className='min-h-screen relative overflow-x-hidden bg-surface text-on-surface selection:bg-accent-gold/30'>
@@ -244,18 +266,32 @@ export default function Home() {
 					<div className='h-6 w-[1px] bg-outline-variant/30'></div>
 
 					<div className='flex items-center gap-4'>
-						<span className='text-[11px] font-label text-secondary italic'>
-							Dominic's Thoughts: The market flows like water.
-						</span>
 						<div className='flex items-center gap-3'>
-							<BellRing className='w-5 h-5 text-emerald-700 cursor-pointer' />
-							<div className='w-8 h-8 rounded-full bg-surface-container overflow-hidden border border-outline-variant/30'>
-								<img
-									className='w-full h-full object-cover'
-									alt='portrait of a focused professional with soft lighting and minimalist background'
-									src='https://lh3.googleusercontent.com/aida-public/AB6AXuAW_x0pLNjz36Ss14x2xOyLoPz7Z3EyqC5CtydvD8H52w8b_zH7nVSKCPhKkhvvmcClxrvnO12vvkBVcbrn13MFKio92wJbSl0CPPHTddWl4Ni_IPFq0Qj0iwznLfoJ21O_wKkZrrGeTnvIDEleupocoQOzxePqUxYvmlAcpH9sWUCwCZAnVSb3a_HftHCQHDzYKap1nH57KUD5ZBQpZTqPghuWGyucMGWhFPmAp2d8w-NfdEQq8yBg_DgNvE9cE6_ht7gnlWVPGRMd'
+							{/* Theme Toggle */}
+							<button
+								onClick={toggleTheme}
+								className='cursor-pointer w-8 h-8 rounded-full border-none outline-none ring-0 hover:bg-accent-gold/10 text-emerald-700 dark:text-emerald-400 transition-colors flex items-center justify-center'
+							>
+								<span className='theme-icon-moon dark:hidden'>🌙</span>
+								<span className='theme-icon-sun hidden dark:block'>☀️</span>
+							</button>
+
+							{/* Help */}
+							<button
+								aria-label='Help'
+								className='cursor-pointer w-8 h-8 rounded-full flex items-center justify-center hover:bg-accent-gold/10 text-emerald-700 dark:text-emerald-400 transition-colors'
+							>
+								<Image
+									src={questionIcon}
+									alt='Help'
+									width={18}
+									height={18}
+									className='theme-adaptive-icon'
 								/>
-							</div>
+							</button>
+
+							{/* Wallet Button */}
+							<WalletButton />
 						</div>
 					</div>
 				</div>
@@ -274,7 +310,6 @@ export default function Home() {
 							<div className='flex h-full w-full [background:var(--app-bg)] [color:var(--app-text)] antialiased overflow-hidden'>
 								<Sidebar />
 								<main className='flex-1 flex flex-col relative min-w-0 [background:var(--app-panel)]'>
-									<Header />
 									<ChatContent />
 								</main>
 							</div>
