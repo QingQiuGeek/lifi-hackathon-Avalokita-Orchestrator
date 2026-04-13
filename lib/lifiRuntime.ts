@@ -291,6 +291,38 @@ export function rankVaultCandidates(
 	return [...primary, ...remainder].slice(0, limit);
 }
 
+export function summarizeVaultSearchOutcome(input: {
+	chainName: string;
+	token: string;
+	totalVaultCount: number;
+	matchingTokenCount: number;
+	transactionalCount: number;
+	selectedVault: Pick<
+		NormalizedVaultCandidate,
+		'name' | 'protocolName' | 'apyTotal' | 'underlyingSymbol'
+	> | null;
+}): string {
+	const token = input.token.trim().toUpperCase() || 'USDC';
+
+	if (input.selectedVault) {
+		return `Found ${input.matchingTokenCount} live ${token} vaults on ${input.chainName}. Best candidate is ${input.selectedVault.name} on ${input.selectedVault.protocolName} at ${input.selectedVault.apyTotal.toFixed(2)}% APY.`;
+	}
+
+	if (input.totalVaultCount === 0) {
+		return `No live vault data was returned on ${input.chainName}.`;
+	}
+
+	if (input.matchingTokenCount === 0) {
+		return `Live vault data was returned on ${input.chainName}, but none of the current results matched ${token}.`;
+	}
+
+	if (input.transactionalCount === 0) {
+		return `Live ${token} vault data was returned on ${input.chainName}, but none of the current results are open for deposits.`;
+	}
+
+	return `Live ${token} vault data was returned on ${input.chainName}, but local ranking did not produce a candidate.`;
+}
+
 export function buildRecommendationSummary(input: {
 	chainName: string;
 	dataSource: 'live' | 'fallback';

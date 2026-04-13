@@ -31,7 +31,7 @@ function renderExecutionStatus(status: ClientExecutionState['status']) {
 		case 'awaiting_wallet_execution':
 			return 'Awaiting deposit signature';
 		case 'submitting':
-			return 'Submitting deposit transaction';
+			return 'Deposit signed, waiting for on-chain confirmation';
 		case 'submitted':
 			return 'Deposit transaction submitted';
 		case 'confirmed':

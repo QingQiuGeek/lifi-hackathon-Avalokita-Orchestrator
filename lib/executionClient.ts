@@ -5,6 +5,7 @@ import {
 	runExecutionPreflight,
 	type ExecutionPreflightResult,
 } from './executionHelpers';
+import { normalizeExecutionError } from './executionErrors';
 import type { ExecutionPreview } from './executionRuntime';
 import { wagmiConfig } from './wagmi.config';
 
@@ -38,6 +39,8 @@ type QuoteTransactionRequest = {
 	gasPrice?: string;
 };
 
+const RECEIPT_TIMEOUT_MS = 120_000;
+
 function explorerBaseUrl(chainId: number): string {
 	switch (chainId) {
 		case 1:
@@ -65,39 +68,6 @@ function toHashes(state: {
 	return {
 		txHashes: hashes,
 		explorerLinks: hashes.map((hash) => toExplorerLink(state.chainId, hash)),
-	};
-}
-
-function mapExecutionError(error: unknown) {
-	const message =
-		error instanceof Error ? error.message : 'Execution failed unexpectedly.';
-	const lower = message.toLowerCase();
-
-	if (lower.includes('user rejected') || lower.includes('user denied')) {
-		return {
-			errorCode: 'user_rejected',
-			error: 'Wallet signature was rejected by the user.',
-		};
-	}
-
-	if (lower.includes('simulation') || lower.includes('gas required exceeds')) {
-		return {
-			errorCode: 'wallet_simulation_failed',
-			error:
-				'The wallet simulation predicts this transaction will fail, so it was not broadcast.',
-		};
-	}
-
-	if (lower.includes('wallet client is unavailable')) {
-		return {
-			errorCode: 'wallet_unavailable',
-			error: message,
-		};
-	}
-
-	return {
-		errorCode: 'execution_failed',
-		error: message,
 	};
 }
 
@@ -230,6 +200,22 @@ export async function executePreviewTransaction(input: {
 
 			const approvalReceipt = await publicClient.waitForTransactionReceipt({
 				hash: approvalTxHash,
+				timeout: RECEIPT_TIMEOUT_MS,
+				onReplaced: (replacement) => {
+					if (replacement.reason === 'cancelled') {
+						throw new Error(
+							'USDC approval transaction was cancelled in the wallet before confirmation.',
+						);
+					}
+
+					approvalTxHash = replacement.transaction.hash;
+					input.onStateChange({
+						status: 'approving',
+						approvalTxHash,
+						...toHashes({ approvalTxHash, chainId }),
+						preflight,
+					});
+				},
 			});
 
 			if (approvalReceipt.status !== 'success') {
@@ -273,7 +259,7 @@ export async function executePreviewTransaction(input: {
 		});
 
 		input.onStateChange({
-			status: 'submitted',
+			status: 'submitting',
 			approvalTxHash,
 			executionTxHash,
 			...toHashes({ approvalTxHash, executionTxHash, chainId }),
@@ -282,6 +268,23 @@ export async function executePreviewTransaction(input: {
 
 		const receipt = await publicClient.waitForTransactionReceipt({
 			hash: executionTxHash,
+			timeout: RECEIPT_TIMEOUT_MS,
+			onReplaced: (replacement) => {
+				if (replacement.reason === 'cancelled') {
+					throw new Error(
+						'Deposit transaction was cancelled in the wallet before confirmation.',
+					);
+				}
+
+				executionTxHash = replacement.transaction.hash;
+				input.onStateChange({
+					status: 'submitting',
+					approvalTxHash,
+					executionTxHash,
+					...toHashes({ approvalTxHash, executionTxHash, chainId }),
+					preflight,
+				});
+			},
 		});
 		const succeeded = receipt.status === 'success';
 
@@ -322,7 +325,7 @@ export function buildFailedExecutionState(input: {
 	executionTxHash?: string;
 	preflight?: ExecutionPreflightResult;
 }): ClientExecutionState {
-	const normalized = mapExecutionError(input.error);
+	const normalized = normalizeExecutionError(input.error);
 	return {
 		status: 'failed',
 		approvalTxHash: input.approvalTxHash,

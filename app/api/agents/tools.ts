@@ -6,9 +6,11 @@ import {
 	getVaultDetails,
 	searchVaults,
 	selectRecommendedVault,
+	type SearchVaultsResult,
 } from '@/lib/lifiDomain';
 import { createAgentStepEvent, type AgentStepEvent } from '@/lib/agentSteps';
 import type { ExecutionQuote } from '@/lib/executionRuntime';
+import { summarizeVaultSearchOutcome } from '@/lib/lifiRuntime';
 import type { PlannerOutput } from '@/lib/plannerRuntime';
 
 export type EarnToolName =
@@ -34,6 +36,8 @@ export type AgentToolResult<T> =
 export type ListVaultsToolData = {
 	chainId: number;
 	count: number;
+	totalCount: number;
+	transactionalCount: number;
 	selectedVault: {
 		address: string;
 		name: string;
@@ -148,6 +152,31 @@ function successResult<T>(data: T, summary: string): AgentToolResult<T> {
 	};
 }
 
+function buildListVaultsSummary(input: {
+	result: SearchVaultsResult;
+	chainId: number;
+	token: string;
+	count: number;
+	transactionalCount: number;
+	selectedVault: ListVaultsToolData['selectedVault'];
+}) {
+	return summarizeVaultSearchOutcome({
+		chainName: chainLabel(input.chainId),
+		token: input.token,
+		totalVaultCount: input.result.success ? input.result.vaults.length : 0,
+		matchingTokenCount: input.count,
+		transactionalCount: input.transactionalCount,
+		selectedVault: input.selectedVault
+			? {
+					name: input.selectedVault.name,
+					protocolName: input.selectedVault.protocol,
+					apyTotal: Number(input.selectedVault.apy),
+					underlyingSymbol: input.selectedVault.underlyingTokens[0] ?? input.token,
+				}
+			: null,
+	});
+}
+
 function failureResult<T = never>(
 	error: string,
 	summary: string,
@@ -226,6 +255,7 @@ export async function runListVaults(
 	const filtered = result.vaults.filter((vault) =>
 		token ? vault.underlyingSymbol === token : true,
 	);
+	const transactionalCount = filtered.filter((vault) => vault.isTransactional).length;
 	const ranked = selectRecommendedVault({
 		vaults: filtered,
 		minApy: minApy ?? null,
@@ -235,14 +265,21 @@ export async function runListVaults(
 	const data: ListVaultsToolData = {
 		chainId,
 		count: filtered.length,
+		totalCount: result.vaults.length,
+		transactionalCount,
 		selectedVault: ranked.selectedVault ? formatVault(ranked.selectedVault) : null,
 		alternatives: ranked.alternatives.map(formatVault),
 		thresholdSatisfied: ranked.thresholdSatisfied,
 	};
 
-	const summary = data.selectedVault
-		? `Found ${data.count} live ${token} vaults on ${chainLabel(chainId)}. Best candidate is ${data.selectedVault.name} on ${data.selectedVault.protocol} at ${data.selectedVault.apy}% APY.`
-		: `No live transactional ${token} vaults are currently available on ${chainLabel(chainId)}.`;
+	const summary = buildListVaultsSummary({
+		result,
+		chainId,
+		token,
+		count: data.count,
+		transactionalCount: data.transactionalCount,
+		selectedVault: data.selectedVault,
+	});
 
 	const success = successResult(data, summary);
 	emitToolStep(

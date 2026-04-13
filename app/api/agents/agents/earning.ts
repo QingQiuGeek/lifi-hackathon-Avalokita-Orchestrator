@@ -155,9 +155,7 @@ function buildFallbackResponse(input: {
 	if (!input.listVaults.data.selectedVault) {
 		return [
 			'Source: live',
-			`No live transactional USDC vaults are currently available on ${chainName(
-				input.plan.targetChain,
-			)}.`,
+			input.listVaults.summary,
 			'Execution preview is unavailable because there is no vault to target.',
 		].join('\n\n');
 	}

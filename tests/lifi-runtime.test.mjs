@@ -202,3 +202,34 @@ test('buildVaultDisplayName expands generic underlying-only vault names', async 
 		'RE7USDC',
 	);
 });
+
+test('summarizeVaultSearchOutcome explains when live data exists but token matches are empty', async () => {
+	const { summarizeVaultSearchOutcome } = await loadLifiRuntimeModule();
+
+	const summary = summarizeVaultSearchOutcome({
+		chainName: 'Base',
+		token: 'USDC',
+		totalVaultCount: 10,
+		matchingTokenCount: 0,
+		transactionalCount: 0,
+		selectedVault: null,
+	});
+
+	assert.match(summary, /live vault data was returned on Base/i);
+	assert.match(summary, /matched USDC/i);
+});
+
+test('summarizeVaultSearchOutcome explains when local ranking fails despite transactional matches', async () => {
+	const { summarizeVaultSearchOutcome } = await loadLifiRuntimeModule();
+
+	const summary = summarizeVaultSearchOutcome({
+		chainName: 'Base',
+		token: 'USDC',
+		totalVaultCount: 8,
+		matchingTokenCount: 3,
+		transactionalCount: 2,
+		selectedVault: null,
+	});
+
+	assert.match(summary, /local ranking did not produce a candidate/i);
+});
