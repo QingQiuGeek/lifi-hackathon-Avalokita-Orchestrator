@@ -1,11 +1,12 @@
 /* eslint-disable @next/next/no-img-element, react/no-unescaped-entities */
 'use client';
 
-import Link from 'next/link';
 import { type ComponentType, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import Sidebar from '@/components/Sidebar';
+import Header from '@/components/Header';
+import ChatContent from '@/components/ChatContent';
 import {
-	ArrowRight,
 	BellRing,
 	Brain,
 	Check,
@@ -17,7 +18,6 @@ import {
 	Shield,
 	Sparkles,
 	Wallet,
-	X,
 	Zap,
 } from 'lucide-react';
 
@@ -25,6 +25,7 @@ const navItems = [
 	{ id: 'dashboard', icon: Wallet, label: 'Jewel-Holder' },
 	{ id: 'analytics', icon: Eye, label: 'Wisdom-Eye' },
 	{ id: 'vaults', icon: Shield, label: 'Abhaya-Giver' },
+	{ id: 'agent', icon: Brain, label: 'Agent' },
 	{ id: 'router', icon: Route, label: 'Avatar-Router' },
 	{ id: 'refinery', icon: Droplet, label: 'Amrita-Refinery' },
 	{ id: 'executor', icon: Zap, label: 'Vajra-Executor' },
@@ -232,12 +233,12 @@ export default function Home() {
 						>
 							Vaults
 						</button>
-						<Link
-							href='/agent'
-							className='font-body uppercase text-xs tracking-widest py-1 transition-all text-stone-400 dark:text-stone-500 hover:text-emerald-600'
+						<button
+							onClick={() => setCurrentView('agent')}
+							className={`font-body uppercase text-xs tracking-widest py-1 transition-all ${currentView === 'agent' ? 'text-emerald-700 dark:text-emerald-400 border-b-2 border-emerald-700' : 'text-stone-400 dark:text-stone-500 hover:text-emerald-600'}`}
 						>
 							Agent
-						</Link>
+						</button>
 					</nav>
 
 					<div className='h-6 w-[1px] bg-outline-variant/30'></div>
@@ -262,6 +263,24 @@ export default function Home() {
 
 			<main className='pl-64 pt-16 min-h-screen z-10 relative'>
 				<AnimatePresence mode='wait'>
+					{currentView === 'agent' && (
+						<motion.div
+							key='agent'
+							initial={{ opacity: 0, x: 20 }}
+							animate={{ opacity: 1, x: 0 }}
+							exit={{ opacity: 0, x: -20 }}
+							className='h-[calc(100vh-4rem)] overflow-hidden'
+						>
+							<div className='flex h-full w-full [background:var(--app-bg)] [color:var(--app-text)] antialiased overflow-hidden'>
+								<Sidebar />
+								<main className='flex-1 flex flex-col relative min-w-0 [background:var(--app-panel)]'>
+									<Header />
+									<ChatContent />
+								</main>
+							</div>
+						</motion.div>
+					)}
+
 					{currentView === 'dashboard' && (
 						<motion.div
 							key='dashboard'
