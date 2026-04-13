@@ -108,6 +108,7 @@ export async function* mainAgentStream(
 			userMessage: input.userMessage,
 			userAddress: input.userAddress,
 			plan,
+			messages: input.messages,
 		})) {
 			yield chunk;
 		}

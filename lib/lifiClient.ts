@@ -18,6 +18,18 @@ export type LifiClientResult<T> = LifiClientSuccess<T> | LifiClientFailure;
 
 type FetchLike = typeof fetch;
 
+function buildRequestHeaders(init?: RequestInit): HeadersInit | undefined {
+	const apiKey = process.env.LIFI_API_KEY?.trim();
+	if (!apiKey) {
+		return init?.headers;
+	}
+
+	return {
+		'x-lifi-api-key': apiKey,
+		...(init?.headers && typeof init.headers === 'object' ? init.headers : {}),
+	};
+}
+
 async function parseJsonResponse(response: Response): Promise<unknown> {
 	const contentType = response.headers.get('content-type') || '';
 	if (!contentType.includes('application/json')) {
@@ -40,6 +52,7 @@ async function requestJson<T>(
 		const response = await fetchImpl(url, {
 			cache: 'no-store',
 			...init,
+			headers: buildRequestHeaders(init),
 		});
 		const payload = await parseJsonResponse(response);
 

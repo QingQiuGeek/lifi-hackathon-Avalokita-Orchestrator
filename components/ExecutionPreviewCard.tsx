@@ -18,6 +18,32 @@ function chainLabel(chainId: number): string {
 	}
 }
 
+function renderExecutionStatus(status: ClientExecutionState['status']) {
+	switch (status) {
+		case 'preflighting':
+			return 'Checking wallet, gas, and allowance';
+		case 'awaiting_wallet_approval':
+			return 'Awaiting wallet approval signature';
+		case 'approving':
+			return 'Approval transaction submitted';
+		case 'approved':
+			return 'Approval confirmed';
+		case 'awaiting_wallet_execution':
+			return 'Awaiting deposit signature';
+		case 'submitting':
+			return 'Submitting deposit transaction';
+		case 'submitted':
+			return 'Deposit transaction submitted';
+		case 'confirmed':
+			return 'Deposit confirmed on chain';
+		case 'failed':
+			return 'Execution failed';
+		case 'idle':
+		default:
+			return 'Idle';
+	}
+}
+
 type ExecutionPreviewCardProps = {
 	plan?: PlannerOutput;
 	preview?: ExecutionPreview;
@@ -55,10 +81,29 @@ export default function ExecutionPreviewCard({
 				<div>Fees: {preview.fees}</div>
 				<div>Route source: {preview.routeSource}</div>
 				<div>
+					Approval target:{' '}
+					{preview.approvalAddress ? preview.approvalAddress : 'Unavailable'}
+				</div>
+				<div>
+					Estimated gas:{' '}
+					{preview.estimatedGasUsd ?? 'n/a'}
+					{preview.estimatedGasNative ? ` (${preview.estimatedGasNative})` : ''}
+				</div>
+				<div>
 					Duration:{' '}
 					{preview.executionDurationSeconds == null
 						? 'n/a'
 						: `${preview.executionDurationSeconds}s`}
+				</div>
+				<div>
+					Approval path:{' '}
+					{executionState?.preflight
+						? executionState.preflight.requiresApproval
+							? 'Approval required before deposit'
+							: 'Allowance already sufficient'
+						: preview.requiresApproval
+							? 'Allowance check required before deposit'
+							: 'No approval expected'}
 				</div>
 				{plan?.minApy != null ? <div>Target APY: {plan.minApy}%+</div> : null}
 				{alternatives.length > 0 ? (
@@ -79,6 +124,12 @@ export default function ExecutionPreviewCard({
 						{executionState.error}
 					</div>
 				) : null}
+				{executionState?.preflight ? (
+					<div className='rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-black/70'>
+						<div>Allowance sufficient: {executionState.preflight.allowanceSufficient ? 'yes' : 'no'}</div>
+						<div>Native gas sufficient: {executionState.preflight.nativeGasSufficient ? 'yes' : 'no'}</div>
+					</div>
+				) : null}
 			</div>
 
 			<div className='mt-4 flex flex-wrap items-center gap-3'>
@@ -87,16 +138,48 @@ export default function ExecutionPreviewCard({
 					onClick={onExecute}
 					disabled={!preview.canExecute}
 					loading={
-						executionState?.status === 'awaiting_wallet' ||
+						executionState?.status === 'preflighting' ||
+						executionState?.status === 'awaiting_wallet_approval' ||
+						executionState?.status === 'approving' ||
+						executionState?.status === 'awaiting_wallet_execution' ||
+						executionState?.status === 'submitting' ||
 						executionState?.status === 'submitted'
 					}
 				>
 					Execute With Wallet
 				</Button>
-				{executionState ? <span>Status: {executionState.status}</span> : null}
+				{executionState ? (
+					<span>Status: {renderExecutionStatus(executionState.status)}</span>
+				) : null}
 			</div>
 
-			{executionState?.txHashes?.length ? (
+			{executionState?.approvalTxHash ? (
+				<div className='mt-3 text-xs'>
+					<a
+						href={executionState.explorerLinks[0]}
+						target='_blank'
+						rel='noreferrer'
+						className='text-blue-700 underline'
+					>
+						Approval tx: {executionState.approvalTxHash}
+					</a>
+				</div>
+			) : null}
+
+			{executionState?.executionTxHash ? (
+				<div className='mt-2 text-xs'>
+					<a
+						href={executionState.explorerLinks[executionState.approvalTxHash ? 1 : 0]}
+						target='_blank'
+						rel='noreferrer'
+						className='text-blue-700 underline'
+					>
+						Deposit tx: {executionState.executionTxHash}
+					</a>
+				</div>
+			) : null}
+
+			{!executionState?.approvalTxHash && !executionState?.executionTxHash && executionState?.txHashes?.length ? (
 				<div className='mt-3 grid gap-1'>
 					{executionState.txHashes.map((hash, index) => (
 						<a

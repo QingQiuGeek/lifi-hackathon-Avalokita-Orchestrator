@@ -78,3 +78,28 @@ test('createLifiClient builds the quote request against li.quest', async () => {
 	assert.match(calls[0].url, /fromAmount=500000000/);
 	assert.equal(calls[0].init?.cache, 'no-store');
 });
+
+test('createLifiClient includes the server-side LI.FI API key header when configured', async () => {
+	const calls = [];
+	process.env.LIFI_API_KEY = 'server-secret';
+
+	const { createLifiClient } = await loadLifiClientModule();
+	const client = createLifiClient(async (url, init) => {
+		calls.push({ url: String(url), init });
+		return new Response(JSON.stringify({ data: [], total: 0 }), {
+			status: 200,
+			headers: { 'content-type': 'application/json' },
+		});
+	});
+
+	await client.getVaults({
+		chainId: 8453,
+		underlyingTokens: 'USDC',
+		limit: 25,
+	});
+
+	assert.equal(calls.length, 1);
+	assert.equal(calls[0].init?.headers?.['x-lifi-api-key'], 'server-secret');
+
+	delete process.env.LIFI_API_KEY;
+});

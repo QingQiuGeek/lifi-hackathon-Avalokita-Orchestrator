@@ -11,6 +11,8 @@ import remarkGfm from 'remark-gfm';
 import { useConnectModal } from '@rainbow-me/rainbowkit';
 import { useAccount, useChainId, useSwitchChain } from 'wagmi';
 import favicon from '../app/favicon.ico';
+import type { AgentStepEvent } from '@/lib/agentSteps';
+import { upsertAgentStep } from '@/lib/agentSteps';
 import type { ExecutionPreview } from '@/lib/executionRuntime';
 import type { NormalizedVaultCandidate } from '@/lib/lifiRuntime';
 import type { PlannerOutput } from '@/lib/plannerRuntime';
@@ -45,6 +47,7 @@ type ChatMessage = {
 	content: string;
 	reasoning?: string;
 	streaming?: boolean;
+	steps?: AgentStepEvent[];
 	plan?: PlannerOutput;
 	executionPreview?: ExecutionPreview;
 	selectedVault?: NormalizedVaultCandidate | null;
@@ -58,6 +61,7 @@ type StreamPayload =
 	| { type: 'error'; content?: string }
 	| { type: 'done' }
 	| { type: 'plan'; plan: PlannerOutput }
+	| AgentStepEvent
 	| {
 			type: 'execution_preview';
 			preview: ExecutionPreview;
@@ -111,6 +115,49 @@ export default function ChatContent() {
 	const messageIdRef = useRef(0);
 	const activeStreamTokenRef = useRef(0);
 	const hasUserMessageRef = useRef(false);
+
+	const renderStepStatus = useCallback((status: AgentStepEvent['status']) => {
+		switch (status) {
+			case 'completed':
+				return 'Done';
+			case 'failed':
+				return 'Failed';
+			case 'running':
+				return 'Running';
+			default:
+				return 'Pending';
+		}
+	}, []);
+
+	const renderAgentSteps = useCallback(
+		(steps: AgentStepEvent[] | undefined) => {
+			if (!steps?.length) {
+				return null;
+			}
+
+			return (
+				<div className='mb-3 grid gap-2'>
+					{steps.map((step) => (
+						<div
+							key={step.key}
+							className='rounded-2xl border border-black/10 bg-black/[0.03] px-3 py-2'
+						>
+							<div className='flex items-center justify-between gap-3 text-xs'>
+								<span className='font-medium text-black'>{step.title}</span>
+								<span className='text-black/60'>
+									{renderStepStatus(step.status)}
+								</span>
+							</div>
+							<div className='mt-1 text-xs leading-5 text-black/70'>
+								{step.summary}
+							</div>
+						</div>
+					))}
+				</div>
+			);
+		},
+		[renderStepStatus],
+	);
 
 	const renderMarkdownContent = useCallback((text: string) => {
 		if (!text) return null;
@@ -199,16 +246,8 @@ export default function ChatContent() {
 					switchChainAsync,
 					onStateChange: (state) => updateExecutionState(aiKey, state),
 				});
-			} catch (error) {
-				updateExecutionState(aiKey, {
-					status: 'failed',
-					txHashes: [],
-					explorerLinks: [],
-					error:
-						error instanceof Error
-							? error.message
-							: 'Execution failed unexpectedly.',
-				});
+			} catch {
+				// The execution client already emitted a terminal failed state.
 			}
 		},
 		[messages, switchChainAsync, updateExecutionState],
@@ -217,6 +256,7 @@ export default function ChatContent() {
 	const renderAiMessage = useCallback(
 		(message: ChatMessage) => (
 			<div>
+				{renderAgentSteps(message.steps)}
 				{renderMarkdownContent(message.content)}
 				<ExecutionPreviewCard
 					plan={message.plan}
@@ -230,7 +270,7 @@ export default function ChatContent() {
 				/>
 			</div>
 		),
-		[executeMessagePlan, renderMarkdownContent],
+		[executeMessagePlan, renderAgentSteps, renderMarkdownContent],
 	);
 
 	const bubbleItems = useMemo<BubbleItemType[]>(
@@ -444,6 +484,19 @@ export default function ChatContent() {
 									: item,
 							),
 						);
+						return;
+					case 'step':
+						setMessages((prev) =>
+							prev.map((item) =>
+								item.key === aiKey
+									? {
+											...item,
+											steps: upsertAgentStep(item.steps ?? [], chunk),
+										}
+									: item,
+							),
+						);
+						scheduleScrollToLatest('auto');
 						return;
 					case 'execution_preview':
 						setMessages((prev) =>

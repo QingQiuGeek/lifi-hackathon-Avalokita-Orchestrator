@@ -7,80 +7,272 @@ import {
 	searchVaults,
 	selectRecommendedVault,
 } from '@/lib/lifiDomain';
+import { createAgentStepEvent, type AgentStepEvent } from '@/lib/agentSteps';
+import type { ExecutionQuote } from '@/lib/executionRuntime';
+import type { PlannerOutput } from '@/lib/plannerRuntime';
 
-export const listVaultsTool = tool({
-	description:
-		'List live LI.FI earn vaults on a target chain, optionally filtered by token and APY.',
-	parameters: z.object({
-		chainId: z.number().describe('The chain ID (1=Ethereum, 8453=Base, 42161=Arbitrum)'),
-		token: z.string().optional().describe('Underlying token symbol, e.g. USDC'),
-		minApy: z.number().optional().describe('Minimum target APY'),
-		limit: z.number().optional().describe('Maximum number of results to return'),
-	}),
-	execute: async ({ chainId, token, minApy, limit = 10 }) => {
-		const result = await searchVaults({
-			chainId,
-			limit: Math.max(limit, 10),
-		});
+export type EarnToolName =
+	| 'listVaults'
+	| 'getVaultDetail'
+	| 'getPortfolio'
+	| 'estimateYield'
+	| 'buildComposerQuote';
 
-		if (!result.success) {
-			return {
-				success: false,
-				error: result.error,
-			};
-		}
+export type AgentToolResult<T> =
+	| {
+			success: true;
+			data: T;
+			summary: string;
+	  }
+	| {
+			success: false;
+			error: string;
+			summary: string;
+			data?: null;
+	  };
 
-		const filtered = result.vaults.filter((vault) =>
-			token ? vault.underlyingSymbol === token.toUpperCase() : true,
-		);
-		const ranked = selectRecommendedVault({
-			vaults: filtered,
-			minApy: minApy ?? null,
-			riskPreference: 'medium',
-		});
-		const list = [ranked.selectedVault, ...ranked.alternatives]
-			.filter((vault): vault is NonNullable<typeof vault> => Boolean(vault))
-			.slice(0, limit)
-			.map((vault) => ({
-				address: vault.address,
-				name: vault.name,
-				protocol: vault.protocolName,
-				apy: vault.apyTotal.toFixed(2),
-				tvl: vault.tvlUsd,
-				underlyingTokens: [vault.underlyingSymbol],
-				tags: vault.tags,
-				openForDeposits: vault.isTransactional,
-			}));
+export type ListVaultsToolData = {
+	chainId: number;
+	count: number;
+	selectedVault: {
+		address: string;
+		name: string;
+		protocol: string;
+		apy: string;
+		tvl: number;
+		underlyingTokens: string[];
+		tags: string[];
+		openForDeposits: boolean;
+	} | null;
+	alternatives: Array<{
+		address: string;
+		name: string;
+		protocol: string;
+		apy: string;
+		tvl: number;
+		underlyingTokens: string[];
+		tags: string[];
+		openForDeposits: boolean;
+	}>;
+	thresholdSatisfied: boolean;
+};
 
-		return {
-			success: true,
-			count: list.length,
-			vaults: list,
-		};
+export type VaultDetailToolData = {
+	vault: {
+		address: string;
+		name: string;
+		protocol: string;
+		apy: string;
+		tvl: number;
+		underlyingTokens: string[];
+		assetAddress: string;
+		descriptions: Record<string, string>;
+		auditLinks: string[];
+	};
+};
+
+export type PortfolioToolData = {
+	positions: Array<{
+		chainId: number;
+		protocolName: string;
+		assetAddress: string;
+		assetSymbol: string;
+		balanceUsd: number;
+		balanceNative: number;
+	}>;
+	totalDeposited: string;
+	totalYield: string;
+	totalApy: string;
+};
+
+export type ComposerQuoteToolData = {
+	action: ExecutionQuote['action'];
+	transactionRequest: ExecutionQuote['transactionRequest'];
+	estimate: ExecutionQuote['estimate'];
+	tool: string;
+	transactionId?: string;
+};
+
+export type EstimateYieldToolData = {
+	principalAmount: string;
+	apyPercent: string;
+	days: number;
+	dailyYield: string;
+	estimatedYield: string;
+	finalAmount: string;
+};
+
+type EarnToolCallbacks = {
+	onStep?: (event: AgentStepEvent) => void;
+	onResult?: (name: EarnToolName, result: AgentToolResult<unknown>) => void;
+};
+
+type EarnToolContext = {
+	plan: PlannerOutput;
+	userAddress: string;
+	callbacks?: EarnToolCallbacks;
+};
+
+function chainLabel(chainId: number): string {
+	switch (chainId) {
+		case 1:
+			return 'Ethereum';
+		case 42161:
+			return 'Arbitrum';
+		case 8453:
+		default:
+			return 'Base';
+	}
+}
+
+function emitToolStep(
+	callbacks: EarnToolCallbacks | undefined,
+	event: AgentStepEvent,
+) {
+	callbacks?.onStep?.(event);
+}
+
+function emitToolResult<T>(
+	callbacks: EarnToolCallbacks | undefined,
+	name: EarnToolName,
+	result: AgentToolResult<T>,
+) {
+	callbacks?.onResult?.(name, result as AgentToolResult<unknown>);
+}
+
+function successResult<T>(data: T, summary: string): AgentToolResult<T> {
+	return {
+		success: true,
+		data,
+		summary,
+	};
+}
+
+function failureResult<T = never>(
+	error: string,
+	summary: string,
+): AgentToolResult<T> {
+	return {
+		success: false,
+		error,
+		summary,
+	};
+}
+
+function formatVault(vault: {
+	address: string;
+	name: string;
+	protocolName: string;
+	apyTotal: number;
+	tvlUsd: number;
+	underlyingSymbol: string;
+	tags: string[];
+	isTransactional: boolean;
+}) {
+	return {
+		address: vault.address,
+		name: vault.name,
+		protocol: vault.protocolName,
+		apy: vault.apyTotal.toFixed(2),
+		tvl: vault.tvlUsd,
+		underlyingTokens: [vault.underlyingSymbol],
+		tags: vault.tags,
+		openForDeposits: vault.isTransactional,
+	};
+}
+
+export async function runListVaults(
+	input: {
+		chainId: number;
+		token?: string;
+		minApy?: number;
+		limit?: number;
 	},
-});
+	context: EarnToolContext,
+): Promise<AgentToolResult<ListVaultsToolData>> {
+	const stepKey = 'vault_search';
+	const chainId = input.chainId || context.plan.targetChain;
+	const token = (input.token || context.plan.asset || 'USDC').toUpperCase();
+	const minApy = input.minApy ?? context.plan.minApy ?? undefined;
+	const limit = Math.max(1, Math.min(input.limit ?? 3, 10));
 
-export const getVaultDetailTool = tool({
-	description: 'Get live details for a vault from the current LI.FI earn dataset.',
-	parameters: z.object({
-		vaultAddress: z.string().describe('The vault contract address'),
-		chainId: z.number().describe('The chain ID where the vault is deployed'),
-	}),
-	execute: async ({ vaultAddress, chainId }) => {
-		const vault = await getVaultDetails({
-			chainId,
-			address: vaultAddress,
-		});
+	emitToolStep(
+		context.callbacks,
+		createAgentStepEvent(
+			stepKey,
+			'running',
+			`Searching live ${token} vaults on ${chainLabel(chainId)}.`,
+		),
+	);
 
-		if (!vault) {
-			return {
-				success: false,
-				error: 'Vault detail not found in the current live vault dataset.',
-			};
-		}
+	const result = await searchVaults({
+		chainId,
+		limit: Math.max(limit, 10),
+	});
 
-		return {
-			success: true,
+	if (!result.success) {
+		const failure = failureResult<ListVaultsToolData>(
+			result.error,
+			`Live vault search failed on ${chainLabel(chainId)}: ${result.error}`,
+		);
+		emitToolStep(
+			context.callbacks,
+			createAgentStepEvent(stepKey, 'failed', failure.summary),
+		);
+		emitToolResult(context.callbacks, 'listVaults', failure);
+		return failure;
+	}
+
+	const filtered = result.vaults.filter((vault) =>
+		token ? vault.underlyingSymbol === token : true,
+	);
+	const ranked = selectRecommendedVault({
+		vaults: filtered,
+		minApy: minApy ?? null,
+		riskPreference: context.plan.riskPreference,
+	});
+
+	const data: ListVaultsToolData = {
+		chainId,
+		count: filtered.length,
+		selectedVault: ranked.selectedVault ? formatVault(ranked.selectedVault) : null,
+		alternatives: ranked.alternatives.map(formatVault),
+		thresholdSatisfied: ranked.thresholdSatisfied,
+	};
+
+	const summary = data.selectedVault
+		? `Found ${data.count} live ${token} vaults on ${chainLabel(chainId)}. Best candidate is ${data.selectedVault.name} on ${data.selectedVault.protocol} at ${data.selectedVault.apy}% APY.`
+		: `No live transactional ${token} vaults are currently available on ${chainLabel(chainId)}.`;
+
+	const success = successResult(data, summary);
+	emitToolStep(
+		context.callbacks,
+		createAgentStepEvent(stepKey, 'completed', summary),
+	);
+	emitToolResult(context.callbacks, 'listVaults', success);
+	return success;
+}
+
+export async function runGetVaultDetail(
+	input: { vaultAddress: string; chainId: number },
+	context: EarnToolContext,
+): Promise<AgentToolResult<VaultDetailToolData>> {
+	const vault = await getVaultDetails({
+		chainId: input.chainId,
+		address: input.vaultAddress,
+	});
+
+	if (!vault) {
+		const failure = failureResult<VaultDetailToolData>(
+			'Vault detail not found in the current live vault dataset.',
+			`Vault detail lookup failed for ${input.vaultAddress} on ${chainLabel(input.chainId)}.`,
+		);
+		emitToolResult(context.callbacks, 'getVaultDetail', failure);
+		return failure;
+	}
+
+	const success = successResult<VaultDetailToolData>(
+		{
 			vault: {
 				address: vault.address,
 				name: vault.name,
@@ -92,143 +284,222 @@ export const getVaultDetailTool = tool({
 				descriptions: {},
 				auditLinks: [],
 			},
-		};
+		},
+		`Loaded vault details for ${vault.name} on ${vault.protocolName}.`,
+	);
+	emitToolResult(context.callbacks, 'getVaultDetail', success);
+	return success;
+}
+
+export async function runGetPortfolio(
+	input: { userAddress: string; chainId: number },
+	context: EarnToolContext,
+): Promise<AgentToolResult<PortfolioToolData>> {
+	emitToolStep(
+		context.callbacks,
+		createAgentStepEvent(
+			'portfolio_check',
+			'running',
+			`Checking wallet positions on ${chainLabel(input.chainId)}.`,
+		),
+	);
+
+	const portfolio = await getPortfolioPositions({ userAddress: input.userAddress });
+	if (!portfolio.success) {
+		const failure = failureResult<PortfolioToolData>(
+			portfolio.error,
+			`Portfolio lookup failed: ${portfolio.error}`,
+		);
+		emitToolStep(
+			context.callbacks,
+			createAgentStepEvent('portfolio_check', 'failed', failure.summary),
+		);
+		emitToolResult(context.callbacks, 'getPortfolio', failure);
+		return failure;
+	}
+
+	const positions = portfolio.positions.filter(
+		(position) => position.chainId === input.chainId,
+	);
+	const success = successResult<PortfolioToolData>(
+		{
+			positions,
+			totalDeposited: '0',
+			totalYield: '0',
+			totalApy: '0',
+		},
+		positions.length > 0
+			? `Found ${positions.length} matching wallet positions on ${chainLabel(input.chainId)}.`
+			: `No matching wallet positions found on ${chainLabel(input.chainId)}.`,
+	);
+	emitToolStep(
+		context.callbacks,
+		createAgentStepEvent('portfolio_check', 'completed', success.summary),
+	);
+	emitToolResult(context.callbacks, 'getPortfolio', success);
+	return success;
+}
+
+export async function runBuildComposerQuote(
+	input: {
+		fromChain: number;
+		toChain: number;
+		toToken: string;
+		amount: number;
+		fromAddress: string;
 	},
-});
+	context: EarnToolContext,
+): Promise<AgentToolResult<ComposerQuoteToolData>> {
+	emitToolStep(
+		context.callbacks,
+		createAgentStepEvent(
+			'quote_build',
+			'running',
+			`Building LI.FI quote for ${input.amount} USDC from ${chainLabel(input.fromChain)} to ${chainLabel(input.toChain)}.`,
+		),
+	);
 
-export const getPortfolioTool = tool({
-	description:
-		"Get the user's LI.FI earn portfolio positions and balances for a target chain.",
-	parameters: z.object({
-		userAddress: z.string().describe("The user's wallet address"),
-		chainId: z.number().describe('The chain ID to filter to'),
-	}),
-	execute: async ({ userAddress, chainId }) => {
-		const portfolio = await getPortfolioPositions({ userAddress });
-		if (!portfolio.success) {
-			return {
-				success: false,
-				error: portfolio.error,
-			};
-		}
+	if (!Number.isFinite(input.amount) || input.amount <= 0) {
+		const failure = failureResult<ComposerQuoteToolData>(
+			'Quote amount must be a positive USDC amount.',
+			'Quote amount must be a positive USDC amount.',
+		);
+		emitToolStep(
+			context.callbacks,
+			createAgentStepEvent('quote_build', 'failed', failure.summary),
+		);
+		emitToolResult(context.callbacks, 'buildComposerQuote', failure);
+		return failure;
+	}
 
-		return {
-			success: true,
-			portfolio: {
-				positions: portfolio.positions.filter(
-					(position) => position.chainId === chainId,
-				),
-				totalDeposited: '0',
-				totalYield: '0',
-				totalApy: '0',
-			},
-		};
-	},
-});
+	const quote = await buildDepositQuote({
+		sourceChainId: input.fromChain,
+		targetChainId: input.toChain,
+		amount: input.amount,
+		fromAddress: input.fromAddress,
+		targetVaultAddress: input.toToken,
+	});
 
-export const buildComposerQuoteTool = tool({
-	description:
-		'Build a live LI.FI Composer quote for depositing USDC into a vault.',
-	parameters: z.object({
-		fromChain: z.number().describe('Source chain ID'),
-		toChain: z.number().describe('Destination chain ID'),
-		fromToken: z.string().describe('Source token symbol or address'),
-		toToken: z.string().describe('Vault address to deposit into'),
-		amount: z.string().describe('Amount in base units (USDC decimals)'),
-		fromAddress: z.string().describe('User wallet address'),
-	}),
-	execute: async ({ fromChain, toChain, toToken, amount, fromAddress }) => {
-		const amountValue = Number(amount) / 1_000_000;
-		if (!Number.isFinite(amountValue) || amountValue <= 0) {
-			return {
-				success: false,
-				error: 'Quote amount must be a positive USDC amount in base units.',
-			};
-		}
+	if (!quote.success) {
+		const failure = failureResult<ComposerQuoteToolData>(
+			quote.error,
+			`Failed to build LI.FI quote: ${quote.error}`,
+		);
+		emitToolStep(
+			context.callbacks,
+			createAgentStepEvent('quote_build', 'failed', failure.summary),
+		);
+		emitToolResult(context.callbacks, 'buildComposerQuote', failure);
+		return failure;
+	}
 
-		const quote = await buildDepositQuote({
-			sourceChainId: fromChain,
-			targetChainId: toChain,
-			amount: amountValue,
-			fromAddress,
-			targetVaultAddress: toToken,
-		});
+	const quoteData = quote.quote;
+	const feeUsd = quoteData.estimate?.feeCosts?.reduce((sum, fee) => {
+		const value = Number(fee.amountUSD ?? 0);
+		return Number.isFinite(value) ? sum + value : sum;
+	}, 0);
+	const success = successResult<ComposerQuoteToolData>(
+		{
+			action: quoteData.action,
+			transactionRequest: quoteData.transactionRequest,
+			estimate: quoteData.estimate,
+			tool: quoteData.tool || 'composer',
+			transactionId: quoteData.transactionId,
+		},
+		`Built LI.FI quote with ${(feeUsd ?? 0).toFixed(2)} USD estimated fees and ${quoteData.estimate?.executionDuration ?? 0}s estimated duration.`,
+	);
+	emitToolStep(
+		context.callbacks,
+		createAgentStepEvent('quote_build', 'completed', success.summary),
+	);
+	emitToolResult(context.callbacks, 'buildComposerQuote', success);
+	return success;
+}
 
-		if (!quote.success) {
-			return {
-				success: false,
-				error: quote.error,
-			};
-		}
+export async function runEstimateYield(
+	input: { principalAmount: number; apyPercent: number; days: number },
+	context: EarnToolContext,
+): Promise<AgentToolResult<EstimateYieldToolData>> {
+	const dailyYieldPercent = input.apyPercent / 365;
+	const dailyYield = input.principalAmount * (dailyYieldPercent / 100);
+	const totalYield = dailyYield * input.days;
+	const finalAmount = input.principalAmount + totalYield;
 
-		return {
-			success: true,
-			quote: {
-				transactionRequest: quote.quote.transactionRequest,
-				estimate: quote.quote.estimate,
-				tool: quote.quote.tool || 'composer',
-				transactionId: quote.quote.transactionId,
-			},
-		};
-	},
-});
+	const success = successResult<EstimateYieldToolData>(
+		{
+			principalAmount: input.principalAmount.toFixed(2),
+			apyPercent: input.apyPercent.toFixed(2),
+			days: input.days,
+			dailyYield: dailyYield.toFixed(2),
+			estimatedYield: totalYield.toFixed(2),
+			finalAmount: finalAmount.toFixed(2),
+		},
+		`Estimated ${totalYield.toFixed(2)} USDC yield over ${input.days} days at ${input.apyPercent.toFixed(2)}% APY.`,
+	);
+	emitToolResult(context.callbacks, 'estimateYield', success);
+	return success;
+}
 
-export const estimateYieldTool = tool({
-	description:
-		'Estimate the yield earned over a period of time on a vault deposit.',
-	parameters: z.object({
-		principalAmount: z.number().describe('Principal amount in USD'),
-		apyPercent: z.number().describe('Annual Percentage Yield, e.g. 4.2'),
-		days: z.number().describe('Number of days to calculate yield for'),
-	}),
-	execute: async ({ principalAmount, apyPercent, days }) => {
-		const dailyYieldPercent = apyPercent / 365;
-		const dailyYield = principalAmount * (dailyYieldPercent / 100);
-		const totalYield = dailyYield * days;
-		const finalAmount = principalAmount + totalYield;
+export function createEarnAgentTools(context: EarnToolContext) {
+	return {
+		listVaults: tool({
+			description:
+				'List live LI.FI earn vaults on a target chain, ranked for the current Earn recommendation flow.',
+			parameters: z.object({
+				chainId: z
+					.number()
+					.describe('The target chain ID (1=Ethereum, 8453=Base, 42161=Arbitrum).'),
+				token: z.string().optional().describe('Underlying token symbol, e.g. USDC.'),
+				minApy: z.number().optional().describe('Minimum target APY threshold.'),
+				limit: z.number().optional().describe('Maximum number of ranked results.'),
+			}),
+			execute: async (args) => runListVaults(args, context),
+		}),
+		getVaultDetail: tool({
+			description: 'Get live details for a specific LI.FI earn vault.',
+			parameters: z.object({
+				vaultAddress: z.string().describe('The vault contract address.'),
+				chainId: z.number().describe('The chain ID where the vault is deployed.'),
+			}),
+			execute: async (args) => runGetVaultDetail(args, context),
+		}),
+		getPortfolio: tool({
+			description:
+				"Get the user's LI.FI earn portfolio positions for the requested chain.",
+			parameters: z.object({
+				userAddress: z.string().describe("The user's wallet address."),
+				chainId: z.number().describe('The chain ID to filter to.'),
+			}),
+			execute: async (args) => runGetPortfolio(args, context),
+		}),
+		estimateYield: tool({
+			description: 'Estimate yield for a deposit over a number of days.',
+			parameters: z.object({
+				principalAmount: z.number().describe('Principal amount in USDC.'),
+				apyPercent: z.number().describe('Annual Percentage Yield, e.g. 4.2.'),
+				days: z.number().describe('Number of days to calculate yield for.'),
+			}),
+			execute: async (args) => runEstimateYield(args, context),
+		}),
+		buildComposerQuote: tool({
+			description:
+				'Build a live LI.FI Composer quote for depositing USDC into the selected vault.',
+			parameters: z.object({
+				fromChain: z.number().describe('Source chain ID.'),
+				toChain: z.number().describe('Destination chain ID.'),
+				toToken: z.string().describe('Vault address to deposit into.'),
+				amount: z.number().describe('Amount in USDC units, e.g. 500.'),
+				fromAddress: z.string().describe('User wallet address.'),
+			}),
+			execute: async (args) => runBuildComposerQuote(args, context),
+		}),
+	};
+}
 
-		return {
-			success: true,
-			yield: {
-				principalAmount: principalAmount.toFixed(2),
-				apyPercent: apyPercent.toFixed(2),
-				days,
-				dailyYield: dailyYield.toFixed(2),
-				estimatedYield: totalYield.toFixed(2),
-				finalAmount: finalAmount.toFixed(2),
-			},
-		};
-	},
-});
-
-export const calculateBridgeFeeTool = tool({
-	description: 'Estimate the bridge fee for a cross-chain transaction.',
-	parameters: z.object({
-		fromChain: z.number().describe('Source chain ID'),
-		toChain: z.number().describe('Destination chain ID'),
-		amount: z.string().describe('Amount in base units'),
-	}),
-	execute: async ({ fromChain, toChain, amount }) => {
-		const amountNum = Number(amount);
-		const fee = Math.max(amountNum * 0.005, 2e6);
-
-		return {
-			success: true,
-			fee: {
-				feeAmount: String(Math.floor(fee)),
-				feePercent: '0.5',
-				fromChain,
-				toChain,
-			},
-		};
-	},
-});
-
-export const agentTools = {
-	listVaults: listVaultsTool,
-	getVaultDetail: getVaultDetailTool,
-	getPortfolio: getPortfolioTool,
-	buildComposerQuote: buildComposerQuoteTool,
-	estimateYield: estimateYieldTool,
-	calculateBridgeFee: calculateBridgeFeeTool,
-};
+export const SAFE_EARN_TOOL_NAMES: EarnToolName[] = [
+	'listVaults',
+	'getVaultDetail',
+	'getPortfolio',
+	'estimateYield',
+	'buildComposerQuote',
+];

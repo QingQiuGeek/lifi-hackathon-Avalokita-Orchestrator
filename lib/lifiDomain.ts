@@ -10,6 +10,7 @@ import {
 	type NormalizedVaultCandidate,
 } from './lifiRuntime';
 import { createLifiClient } from './lifiClient';
+import type { ExecutionQuote } from './executionRuntime';
 
 export const USDC_TOKEN_BY_CHAIN: Record<number, string> = {
 	1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
@@ -45,7 +46,7 @@ export type PortfolioPositionsResult =
 export type BuildQuoteResult =
 	| {
 			success: true;
-			quote: Record<string, unknown>;
+			quote: ExecutionQuote;
 	  }
 	| {
 			success: false;
@@ -169,16 +170,6 @@ export async function buildDepositQuote(input: {
 		}
 
 		const amountBaseUnits = parseUnits(String(input.amount), 6).toString();
-		const params = new URLSearchParams({
-			fromChain: String(input.sourceChainId),
-			toChain: String(input.targetChainId),
-			fromToken,
-			toToken: input.targetVaultAddress,
-			fromAmount: amountBaseUnits,
-			fromAddress: input.fromAddress,
-			toAddress: input.fromAddress,
-		});
-
 		const response = await lifiClient.getQuote({
 			fromChain: input.sourceChainId,
 			toChain: input.targetChainId,
@@ -198,7 +189,7 @@ export async function buildDepositQuote(input: {
 
 		return {
 			success: true,
-			quote: response.data,
+			quote: response.data as ExecutionQuote,
 		};
 	} catch (error) {
 		return {
