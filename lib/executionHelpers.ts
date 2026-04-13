@@ -7,7 +7,8 @@ export type ExecutionPreflightResult = {
 		| 'blocked_quote_failure'
 		| 'blocked_wallet_context'
 		| 'blocked_missing_approval_target'
-		| 'blocked_insufficient_gas';
+		| 'blocked_insufficient_gas'
+		| 'blocked_unsupported_cross_chain_pair';
 	requiresApproval: boolean;
 	allowanceSufficient: boolean;
 	nativeGasSufficient: boolean;
@@ -66,6 +67,14 @@ function sumGasAmount(
 	}, BigInt(0));
 }
 
+function isSupportedCrossChainPair(fromChain: number, toChain: number): boolean {
+	return (
+		(fromChain === 1 && (toChain === 8453 || toChain === 42161)) ||
+		(fromChain === 8453 && toChain === 42161) ||
+		(fromChain === 42161 && toChain === 8453)
+	);
+}
+
 export function runExecutionPreflight(input: {
 	preview: MinimalPreview;
 	wallet: WalletExecutionContext;
@@ -76,10 +85,13 @@ export function runExecutionPreflight(input: {
 		: null;
 	const approvalAddress = quote?.estimate?.approvalAddress ?? null;
 
-	if (input.preview.fromChain !== input.preview.toChain) {
+	if (
+		input.preview.fromChain !== input.preview.toChain &&
+		!isSupportedCrossChainPair(input.preview.fromChain, input.preview.toChain)
+	) {
 		return {
 			ready: false,
-			reason: 'blocked_quote_failure',
+			reason: 'blocked_unsupported_cross_chain_pair',
 			requiresApproval: false,
 			allowanceSufficient: false,
 			nativeGasSufficient: true,

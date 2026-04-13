@@ -94,6 +94,8 @@ export type ComposerQuoteToolData = {
 	transactionRequest: ExecutionQuote['transactionRequest'];
 	estimate: ExecutionQuote['estimate'];
 	tool: string;
+	toolDetails?: ExecutionQuote['toolDetails'];
+	includedSteps?: ExecutionQuote['includedSteps'];
 	transactionId?: string;
 };
 
@@ -441,6 +443,8 @@ export async function runBuildComposerQuote(
 			transactionRequest: quoteData.transactionRequest,
 			estimate: quoteData.estimate,
 			tool: quoteData.tool || 'composer',
+			toolDetails: quoteData.toolDetails,
+			includedSteps: quoteData.includedSteps,
 			transactionId: quoteData.transactionId,
 		},
 		`Built LI.FI quote with ${(feeUsd ?? 0).toFixed(2)} USD estimated fees and ${quoteData.estimate?.executionDuration ?? 0}s estimated duration.`,

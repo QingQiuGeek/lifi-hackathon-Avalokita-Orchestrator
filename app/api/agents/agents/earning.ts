@@ -1,7 +1,7 @@
 import { generateText } from 'ai';
 import { getAgentConfig } from '@/lib/agentConfig';
 import { getModelFromConfig } from '@/lib/agentClient';
-import type { AgentStepEvent } from '@/lib/agentSteps';
+import { createAgentStepEvent, type AgentStepEvent } from '@/lib/agentSteps';
 import { buildExecutionPreview, type ExecutionPreview } from '@/lib/executionRuntime';
 import {
 	buildVaultDisplayName,
@@ -10,6 +10,7 @@ import {
 } from '@/lib/lifiRuntime';
 import type { PlannerOutput } from '@/lib/plannerRuntime';
 import { SUPPORTED_CHAINS } from '@/lib/chains';
+import { buildDepositQuote, renderEarnRecommendation } from '@/lib/lifiDomain';
 import {
 	createEarnAgentTools,
 	runGetPortfolio,
@@ -19,7 +20,6 @@ import {
 	type ListVaultsToolData,
 	type PortfolioToolData,
 } from '../tools';
-import { renderEarnRecommendation } from '@/lib/lifiDomain';
 
 export type EarningAgentInput = {
 	userMessage: string;
@@ -79,6 +79,9 @@ function buildEarnSystemPrompt(): string {
 		'Call getPortfolio only if wallet context helps explain the recommendation.',
 		'Call getVaultDetail only when you need extra facts about a candidate vault.',
 		'If the user provided an amount, call buildComposerQuote after you know the selected vault address.',
+		'For cross-chain Earn requests, search vaults on the target chain first and only then build the quote from the source chain into that target vault.',
+		'Only support cross-chain Earn into Base (8453) or Arbitrum (42161). Requests targeting Ethereum across chains must be treated as unsupported.',
+		'Never describe a cross-chain route as fully completed on the destination chain. At most, the app confirms the source-chain route transaction.',
 		'You may call estimateYield to explain projected returns.',
 		'Never invent vault names, APY, TVL, fee, or quote data.',
 		'Never claim a transaction has executed. Wallet confirmation and transaction submission happen outside of the model.',
@@ -134,6 +137,108 @@ function toPortfolioPositions(
 	result: AgentToolResult<PortfolioToolData> | null,
 ): NormalizedPortfolioPosition[] {
 	return result?.success ? result.data.positions : [];
+}
+
+function toExecutionQuote(
+	result: AgentToolResult<ComposerQuoteToolData> | null,
+) {
+	if (!result?.success) {
+		return null;
+	}
+
+	return {
+		action: result.data.action,
+		estimate: result.data.estimate,
+		tool: result.data.tool,
+		toolDetails: result.data.toolDetails,
+		includedSteps: result.data.includedSteps,
+		transactionRequest: result.data.transactionRequest,
+		transactionId: result.data.transactionId,
+	};
+}
+
+function buildQuoteSummary(
+	quote: NonNullable<ReturnType<typeof toExecutionQuote>>,
+): string {
+	const feeUsd = quote.estimate?.feeCosts?.reduce((sum, fee) => {
+		const value = Number(fee.amountUSD ?? 0);
+		return Number.isFinite(value) ? sum + value : sum;
+	}, 0);
+
+	return `Built LI.FI quote with ${(feeUsd ?? 0).toFixed(2)} USD estimated fees and ${quote.estimate?.executionDuration ?? 0}s estimated duration.`;
+}
+
+async function resolveExecutableQuote(input: {
+	plan: PlannerOutput;
+	userAddress: string;
+	selectedVault: NormalizedVaultCandidate;
+	alternatives: NormalizedVaultCandidate[];
+	currentQuote: AgentToolResult<ComposerQuoteToolData> | null;
+}) {
+	if (input.plan.amount == null || input.currentQuote?.success) {
+		return {
+			selectedVault: input.selectedVault,
+			alternatives: input.alternatives,
+			quote: input.currentQuote,
+			attemptedCandidates: 0,
+			recovered: false,
+		};
+	}
+
+	const candidates = [input.selectedVault, ...input.alternatives];
+	let lastError =
+		input.currentQuote?.success === false
+			? input.currentQuote.error
+			: 'Live LI.FI quote data is unavailable right now.';
+
+	for (const candidate of candidates) {
+		const quoteResult = await buildDepositQuote({
+			sourceChainId: input.plan.sourceChain,
+			targetChainId: input.plan.targetChain,
+			amount: input.plan.amount,
+			fromAddress: input.userAddress,
+			targetVaultAddress: candidate.address,
+		});
+
+		if (!quoteResult.success) {
+			lastError = quoteResult.error;
+			continue;
+		}
+
+		const quote = {
+			action: quoteResult.quote.action,
+			estimate: quoteResult.quote.estimate,
+			tool: quoteResult.quote.tool || 'composer',
+			toolDetails: quoteResult.quote.toolDetails,
+			includedSteps: quoteResult.quote.includedSteps,
+			transactionRequest: quoteResult.quote.transactionRequest,
+			transactionId: quoteResult.quote.transactionId,
+		};
+
+		return {
+			selectedVault: candidate,
+			alternatives: candidates.filter((vault) => vault.address !== candidate.address),
+			quote: {
+				success: true as const,
+				data: quote,
+				summary: buildQuoteSummary(quote),
+			},
+			attemptedCandidates: candidates.length,
+			recovered: candidate.address !== input.selectedVault.address,
+		};
+	}
+
+	return {
+		selectedVault: input.selectedVault,
+		alternatives: input.alternatives,
+		quote: {
+			success: false as const,
+			error: lastError,
+			summary: `Failed to build LI.FI quote: ${lastError}`,
+		},
+		attemptedCandidates: candidates.length,
+		recovered: false,
+	};
 }
 
 function buildFallbackResponse(input: {
@@ -280,11 +385,11 @@ export async function* earningAgentStream(
 	}
 
 	const listVaults = runtimeState.listVaults;
-	const selectedVault =
+	let selectedVault =
 		listVaults?.success && listVaults.data.selectedVault
 			? toNormalizedVault(listVaults.data.selectedVault, input.plan.targetChain)
 			: null;
-	const alternatives =
+	let alternatives =
 		listVaults?.success && listVaults.data.alternatives.length > 0
 			? toNormalizedAlternatives(
 					listVaults.data.alternatives,
@@ -303,6 +408,30 @@ export async function* earningAgentStream(
 		return;
 	}
 
+	const quoteResolution = await resolveExecutableQuote({
+		plan: input.plan,
+		userAddress: input.userAddress,
+		selectedVault,
+		alternatives,
+		currentQuote: runtimeState.quote,
+	});
+	selectedVault = quoteResolution.selectedVault;
+	alternatives = quoteResolution.alternatives;
+	runtimeState.quote = quoteResolution.quote;
+
+	if (input.plan.amount != null && quoteResolution.attemptedCandidates > 0) {
+		yield createAgentStepEvent(
+			'quote_build',
+			runtimeState.quote?.success ? 'completed' : 'failed',
+			runtimeState.quote?.success
+				? quoteResolution.recovered
+					? `Built a cross-chain compatible LI.FI quote for ${buildVaultDisplayName(selectedVault)} after checking multiple vault options.`
+					: runtimeState.quote.summary
+				: runtimeState.quote?.summary ??
+					'LI.FI quote could not be built for the current vault options.',
+		);
+	}
+
 	const executionPreview = buildExecutionPreview({
 		plan: input.plan,
 		selectedVault: {
@@ -311,27 +440,7 @@ export async function* earningAgentStream(
 			displayName: buildVaultDisplayName(selectedVault),
 			dataSource: selectedVault.dataSource,
 		},
-		quote:
-			runtimeState.quote?.success
-				? {
-						action: runtimeState.quote.data.action,
-						estimate: runtimeState.quote.data.estimate as {
-							approvalAddress?: string;
-							toAmount?: string;
-							toAmountMin?: string;
-							executionDuration?: number;
-							feeCosts?: Array<{ amountUSD?: string }>;
-							gasCosts?: Array<{
-								amount?: string;
-								amountUSD?: string;
-								token?: { symbol?: string };
-							}>;
-						},
-						tool: runtimeState.quote.data.tool,
-						transactionRequest: runtimeState.quote.data.transactionRequest,
-						transactionId: runtimeState.quote.data.transactionId,
-					}
-				: null,
+		quote: toExecutionQuote(runtimeState.quote),
 	});
 
 	yield {

@@ -23,6 +23,11 @@ const promptItems: PromptsProps['items'] = [
 		icon: <CheckCircleOutlined style={{ color: '#52C41A' }} />,
 		description: 'Deposit 5 USDC into the safest vault on Arbitrum',
 	},
+	{
+		key: '4',
+		icon: <InfoCircleOutlined style={{ color: '#722ED1' }} />,
+		description: 'Move 10 USDC from Base into the best USDC vault on Arbitrum',
+	},
 ];
 
 interface PromptProps {

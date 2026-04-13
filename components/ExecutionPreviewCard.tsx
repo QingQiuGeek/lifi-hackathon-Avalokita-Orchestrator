@@ -18,7 +18,12 @@ function chainLabel(chainId: number): string {
 	}
 }
 
-function renderExecutionStatus(status: ClientExecutionState['status']) {
+function renderExecutionStatus(
+	status: ClientExecutionState['status'],
+	preview?: ExecutionPreview,
+) {
+	const isCrossChain = preview?.executionKind === 'cross_chain';
+
 	switch (status) {
 		case 'preflighting':
 			return 'Checking wallet, gas, and allowance';
@@ -29,13 +34,19 @@ function renderExecutionStatus(status: ClientExecutionState['status']) {
 		case 'approved':
 			return 'Approval confirmed';
 		case 'awaiting_wallet_execution':
-			return 'Awaiting deposit signature';
+			return isCrossChain
+				? 'Awaiting bridge route signature'
+				: 'Awaiting deposit signature';
 		case 'submitting':
-			return 'Deposit signed, waiting for on-chain confirmation';
+			return isCrossChain
+				? 'Route signed, waiting for source-chain confirmation'
+				: 'Deposit signed, waiting for on-chain confirmation';
 		case 'submitted':
-			return 'Deposit transaction submitted';
+			return isCrossChain ? 'Route transaction submitted' : 'Deposit transaction submitted';
 		case 'confirmed':
-			return 'Deposit confirmed on chain';
+			return isCrossChain
+				? 'Source-chain route confirmed'
+				: 'Deposit confirmed on chain';
 		case 'failed':
 			return 'Execution failed';
 		case 'idle':
@@ -71,10 +82,13 @@ export default function ExecutionPreviewCard({
 			<div className='mt-3 grid gap-2 text-black/80'>
 				<div>Selected vault: {preview.targetVault}</div>
 				<div>Protocol: {selectedVault?.protocolName ?? 'Unknown'}</div>
+				<div>Execution kind: {preview.executionKind}</div>
 				<div>
 					Route: {chainLabel(preview.fromChain)} {'->'}{' '}
 					{chainLabel(preview.toChain)}
 				</div>
+				<div>Destination chain: {preview.destinationChainLabel}</div>
+				<div>Bridge required: {preview.bridgeRequired ? 'yes' : 'no'}</div>
 				<div>
 					Amount: {preview.fromAmount ? `${preview.fromAmount} ${preview.fromToken}` : 'Not provided'}
 				</div>
@@ -99,12 +113,27 @@ export default function ExecutionPreviewCard({
 					Approval path:{' '}
 					{executionState?.preflight
 						? executionState.preflight.requiresApproval
-							? 'Approval required before deposit'
+							? preview.executionKind === 'cross_chain'
+								? 'Approval required before the route transaction'
+								: 'Approval required before deposit'
 							: 'Allowance already sufficient'
 						: preview.requiresApproval
-							? 'Allowance check required before deposit'
+							? preview.executionKind === 'cross_chain'
+								? 'Allowance check required before the route transaction'
+								: 'Allowance check required before deposit'
 							: 'No approval expected'}
 				</div>
+				<div>
+					Tracking scope:{' '}
+					{preview.statusTrackingScope === 'source_tx_only'
+						? 'Source chain transaction only'
+						: 'Full route'}
+				</div>
+				{preview.routeStepsSummary.length > 0 ? (
+					<div>
+						Route steps: {preview.routeStepsSummary.join(' | ')}
+					</div>
+				) : null}
 				{plan?.minApy != null ? <div>Target APY: {plan.minApy}%+</div> : null}
 				{alternatives.length > 0 ? (
 					<div>
@@ -149,7 +178,7 @@ export default function ExecutionPreviewCard({
 					Execute With Wallet
 				</Button>
 				{executionState ? (
-					<span>Status: {renderExecutionStatus(executionState.status)}</span>
+					<span>Status: {renderExecutionStatus(executionState.status, preview)}</span>
 				) : null}
 			</div>
 
@@ -174,7 +203,8 @@ export default function ExecutionPreviewCard({
 						rel='noreferrer'
 						className='text-blue-700 underline'
 					>
-						Deposit tx: {executionState.executionTxHash}
+						{preview.executionKind === 'cross_chain' ? 'Route tx' : 'Deposit tx'}:{' '}
+						{executionState.executionTxHash}
 					</a>
 				</div>
 			) : null}

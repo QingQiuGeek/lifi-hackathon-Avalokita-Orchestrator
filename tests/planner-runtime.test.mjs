@@ -75,6 +75,19 @@ test('buildPlannerFallback treats execute/go ahead language as execute mode', as
 	assert.equal(plan.targetChain, 8453);
 });
 
+test('buildPlannerFallback preserves cross-chain source and target chains', async () => {
+	const { buildPlannerFallback } = await loadPlannerRuntimeModule();
+
+	const plan = buildPlannerFallback({
+		message: 'move 100 USDC from Base into the best USDC vault on Arbitrum',
+		walletChainId: 8453,
+	});
+
+	assert.equal(plan.intent, 'earn.deposit');
+	assert.equal(plan.sourceChain, 8453);
+	assert.equal(plan.targetChain, 42161);
+});
+
 test('extractPlannerPayload accepts valid JSON planner output and normalizes chains', async () => {
 	const { extractPlannerPayload } = await loadPlannerRuntimeModule();
 

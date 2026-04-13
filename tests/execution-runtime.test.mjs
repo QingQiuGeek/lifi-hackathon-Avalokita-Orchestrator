@@ -153,6 +153,9 @@ test('buildExecutionPreview summarizes quote values for live execution', async (
 	assert.equal(preview.routeSource, 'live');
 	assert.equal(preview.targetVault, 'RE7USDC');
 	assert.equal(preview.fees, '$1.23');
+	assert.equal(preview.executionKind, 'same_chain');
+	assert.equal(preview.bridgeRequired, false);
+	assert.equal(preview.statusTrackingScope, 'full_route');
 });
 
 test('buildExecutionPreview marks missing quote as blocked quote failure when amount is present', async () => {
@@ -192,7 +195,7 @@ test('buildExecutionPreview marks missing quote as blocked quote failure when am
 	assert.match(preview.blockingReason ?? '', /quote/i);
 });
 
-test('buildExecutionPreview blocks same-asset cross-chain execution in v1', async () => {
+test('buildExecutionPreview allows supported cross-chain execution when LI.FI returns route data', async () => {
 	const { buildExecutionPreview } = await loadExecutionRuntimeModule();
 
 	const preview = buildExecutionPreview({
@@ -208,13 +211,13 @@ test('buildExecutionPreview blocks same-asset cross-chain execution in v1', asyn
 			mode: 'execute',
 		},
 		selectedVault: {
-			address: '0xvault',
+			address: '0x724dc807b04555b71ed48a6896b6f41593b8c637',
 			chainId: 42161,
-			name: 'GTUSDC',
-			protocolName: 'morpho-v1',
+			name: 'USDC',
+			protocolName: 'aave-v3',
 			underlyingSymbol: 'USDC',
 			underlyingTokenAddress: '0xusdc',
-			apyTotal: 4.2,
+			apyTotal: 1.49,
 			tvlUsd: 123000000,
 			tags: ['stablecoin'],
 			isTransactional: true,
@@ -238,13 +241,70 @@ test('buildExecutionPreview blocks same-asset cross-chain execution in v1', asyn
 				to: '0xrouter',
 				data: '0x1234',
 			},
-			tool: 'composer',
+			tool: 'stargateV2',
+			toolDetails: { name: 'StargateV2 (Fast mode)' },
+			includedSteps: [
+				{
+					tool: 'stargateV2',
+					toolDetails: { name: 'StargateV2 (Fast mode)' },
+					action: { fromChainId: 8453, toChainId: 42161 },
+				},
+				{
+					tool: 'composer',
+					toolDetails: { name: 'Composer' },
+					action: { fromChainId: 42161, toChainId: 42161 },
+				},
+			],
 		},
 	});
 
+	assert.equal(preview.canExecute, true);
+	assert.equal(preview.eligibility, 'ready');
+	assert.equal(preview.executionKind, 'cross_chain');
+	assert.equal(preview.bridgeRequired, true);
+	assert.equal(preview.destinationChainLabel, 'Arbitrum');
+	assert.equal(preview.statusTrackingScope, 'source_tx_only');
+	assert.deepEqual(preview.routeStepsSummary, [
+		'Bridge from Base to Arbitrum with StargateV2 (Fast mode)',
+		'Deposit into the target vault with Composer',
+	]);
+});
+
+test('buildExecutionPreview blocks unsupported cross-chain pairs before wallet execution', async () => {
+	const { buildExecutionPreview } = await loadExecutionRuntimeModule();
+
+	const preview = buildExecutionPreview({
+		plan: {
+			intent: 'earn.deposit',
+			asset: 'USDC',
+			amount: 25,
+			sourceChain: 8453,
+			targetChain: 1,
+			minApy: 4,
+			riskPreference: 'low',
+			needsConfirmation: true,
+			mode: 'execute',
+		},
+		selectedVault: {
+			address: '0xvault',
+			chainId: 1,
+			name: 'USDC',
+			protocolName: 'aave-v3',
+			underlyingSymbol: 'USDC',
+			underlyingTokenAddress: '0xusdc',
+			apyTotal: 1.2,
+			tvlUsd: 50000000,
+			tags: ['stablecoin'],
+			isTransactional: true,
+			isRedeemable: true,
+			dataSource: 'live',
+		},
+		quote: null,
+	});
+
 	assert.equal(preview.canExecute, false);
-	assert.equal(preview.eligibility, 'blocked_quote_failure');
-	assert.match(preview.blockingReason ?? '', /cross-chain/i);
+	assert.equal(preview.eligibility, 'blocked_unsupported_cross_chain_pair');
+	assert.match(preview.blockingReason ?? '', /not enabled/i);
 });
 
 test('buildExecutionPreview blocks execution when approval target is missing', async () => {

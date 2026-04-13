@@ -4,7 +4,11 @@ export type ExecutionEligibility =
 	| 'blocked_quote_failure'
 	| 'blocked_wallet_context'
 	| 'blocked_missing_approval_target'
-	| 'blocked_insufficient_gas';
+	| 'blocked_insufficient_gas'
+	| 'blocked_unsupported_cross_chain_pair';
+
+export type ExecutionKind = 'same_chain' | 'cross_chain';
+export type StatusTrackingScope = 'full_route' | 'source_tx_only';
 
 export type ExecutionQuoteTransactionRequest = {
 	to?: string;
@@ -21,6 +25,13 @@ export type ExecutionQuote = {
 			address?: string;
 			symbol?: string;
 		};
+		toToken?: {
+			address?: string;
+			symbol?: string;
+			name?: string;
+		};
+		fromChainId?: number;
+		toChainId?: number;
 	};
 	estimate?: {
 		approvalAddress?: string;
@@ -35,6 +46,23 @@ export type ExecutionQuote = {
 		}>;
 	};
 	tool?: string;
+	toolDetails?: {
+		name?: string;
+	};
+	includedSteps?: Array<{
+		tool?: string;
+		toolDetails?: {
+			name?: string;
+		};
+		action?: {
+			fromChainId?: number;
+			toChainId?: number;
+			toToken?: {
+				symbol?: string;
+				name?: string;
+			};
+		};
+	}>;
 	transactionRequest?: ExecutionQuoteTransactionRequest;
 	transactionId?: string;
 };
@@ -58,6 +86,11 @@ export type ExecutionPreview = {
 	approvalAddress: string | null;
 	estimatedGasUsd: string | null;
 	estimatedGasNative: string | null;
+	executionKind: ExecutionKind;
+	bridgeRequired: boolean;
+	destinationChainLabel: string;
+	routeStepsSummary: string[];
+	statusTrackingScope: StatusTrackingScope;
 	quote: ExecutionQuote | null;
 };
 
@@ -84,6 +117,72 @@ type PreviewInput = {
 
 function hasValidAmount(amount: number | null): amount is number {
 	return typeof amount === 'number' && Number.isFinite(amount) && amount > 0;
+}
+
+function chainLabel(chainId: number): string {
+	switch (chainId) {
+		case 1:
+			return 'Ethereum';
+		case 42161:
+			return 'Arbitrum';
+		case 8453:
+			return 'Base';
+		default:
+			return `Chain ${chainId}`;
+	}
+}
+
+function getExecutionKind(fromChain: number, toChain: number): ExecutionKind {
+	return fromChain === toChain ? 'same_chain' : 'cross_chain';
+}
+
+function isSupportedCrossChainPair(fromChain: number, toChain: number): boolean {
+	return (
+		(fromChain === 1 && (toChain === 8453 || toChain === 42161)) ||
+		(fromChain === 8453 && toChain === 42161) ||
+		(fromChain === 42161 && toChain === 8453)
+	);
+}
+
+function summarizeRouteSteps(input: {
+	fromChain: number;
+	toChain: number;
+	quote: ExecutionQuote | null;
+	executionKind: ExecutionKind;
+}): string[] {
+	const summarized = (input.quote?.includedSteps ?? [])
+		.filter((step) => step.tool !== 'feeCollection')
+		.map((step) => {
+			const toolName = step.toolDetails?.name ?? step.tool ?? 'LI.FI';
+			if (step.tool === 'composer') {
+				return `Deposit into the target vault with ${toolName}`;
+			}
+
+			if (
+				typeof step.action?.fromChainId === 'number' &&
+				typeof step.action?.toChainId === 'number' &&
+				step.action.fromChainId !== step.action.toChainId
+			) {
+				return `Bridge from ${chainLabel(step.action.fromChainId)} to ${chainLabel(step.action.toChainId)} with ${toolName}`;
+			}
+
+			if (step.action?.toToken?.symbol) {
+				return `Acquire ${step.action.toToken.symbol} with ${toolName}`;
+			}
+
+			return `Process with ${toolName}`;
+		});
+
+	if (summarized.length > 0) {
+		return summarized;
+	}
+
+	return input.executionKind === 'cross_chain'
+		? [
+				`Bridge from ${chainLabel(input.fromChain)} to ${chainLabel(input.toChain)}`,
+				'Deposit into the target vault',
+			]
+		: ['Deposit into the target vault'];
 }
 
 function sumUsdFees(feeCosts: Array<{ amountUSD?: string }> = []): string {
@@ -141,6 +240,21 @@ function sumGasAmounts(
 }
 
 export function buildExecutionPreview(input: PreviewInput): ExecutionPreview {
+	const executionKind = getExecutionKind(
+		input.plan.sourceChain,
+		input.plan.targetChain,
+	);
+	const bridgeRequired = executionKind === 'cross_chain';
+	const destinationChainLabel = chainLabel(input.plan.targetChain);
+	const statusTrackingScope: StatusTrackingScope =
+		executionKind === 'cross_chain' ? 'source_tx_only' : 'full_route';
+	const routeStepsSummary = summarizeRouteSteps({
+		fromChain: input.plan.sourceChain,
+		toChain: input.plan.targetChain,
+		quote: input.quote,
+		executionKind,
+	});
+
 	if (!hasValidAmount(input.plan.amount)) {
 		return {
 			canExecute: false,
@@ -162,16 +276,24 @@ export function buildExecutionPreview(input: PreviewInput): ExecutionPreview {
 			approvalAddress: null,
 			estimatedGasUsd: null,
 			estimatedGasNative: null,
+			executionKind,
+			bridgeRequired,
+			destinationChainLabel,
+			routeStepsSummary,
+			statusTrackingScope,
 			quote: input.quote,
 		};
 	}
 
-	if (input.plan.sourceChain !== input.plan.targetChain) {
+	if (
+		executionKind === 'cross_chain' &&
+		!isSupportedCrossChainPair(input.plan.sourceChain, input.plan.targetChain)
+	) {
 		return {
 			canExecute: false,
-			eligibility: 'blocked_quote_failure',
+			eligibility: 'blocked_unsupported_cross_chain_pair',
 			blockingReason:
-				'Cross-chain Earn execution is not enabled in this version yet.',
+				'This cross-chain Earn pair is not enabled in this version yet.',
 			routeSource: input.selectedVault.dataSource,
 			fromChain: input.plan.sourceChain,
 			toChain: input.plan.targetChain,
@@ -187,6 +309,11 @@ export function buildExecutionPreview(input: PreviewInput): ExecutionPreview {
 			approvalAddress: input.quote?.estimate?.approvalAddress ?? null,
 			estimatedGasUsd: sumGasAmounts(input.quote?.estimate?.gasCosts).usd,
 			estimatedGasNative: sumGasAmounts(input.quote?.estimate?.gasCosts).native,
+			executionKind,
+			bridgeRequired,
+			destinationChainLabel,
+			routeStepsSummary,
+			statusTrackingScope,
 			quote: input.quote,
 		};
 	}
@@ -211,6 +338,11 @@ export function buildExecutionPreview(input: PreviewInput): ExecutionPreview {
 			approvalAddress: null,
 			estimatedGasUsd: null,
 			estimatedGasNative: null,
+			executionKind,
+			bridgeRequired,
+			destinationChainLabel,
+			routeStepsSummary,
+			statusTrackingScope,
 			quote: null,
 		};
 	}
@@ -236,6 +368,11 @@ export function buildExecutionPreview(input: PreviewInput): ExecutionPreview {
 			approvalAddress: null,
 			estimatedGasUsd: sumGasAmounts(input.quote.estimate?.gasCosts).usd,
 			estimatedGasNative: sumGasAmounts(input.quote.estimate?.gasCosts).native,
+			executionKind,
+			bridgeRequired,
+			destinationChainLabel,
+			routeStepsSummary,
+			statusTrackingScope,
 			quote: input.quote,
 		};
 	}
@@ -270,6 +407,11 @@ export function buildExecutionPreview(input: PreviewInput): ExecutionPreview {
 		approvalAddress: input.quote.estimate?.approvalAddress ?? null,
 		estimatedGasUsd: gasSummary.usd,
 		estimatedGasNative: gasSummary.native,
+		executionKind,
+		bridgeRequired,
+		destinationChainLabel,
+		routeStepsSummary,
+		statusTrackingScope,
 		quote: input.quote,
 	};
 }

@@ -153,6 +153,69 @@ test('runExecutionPreflight marks allowance shortfall as requiring approval inst
 	assert.equal(result.amountBaseUnits, 5000000n);
 });
 
+test('runExecutionPreflight allows supported cross-chain source transactions', async () => {
+	const { runExecutionPreflight } = await loadExecutionHelpersModule();
+
+	const result = runExecutionPreflight({
+		preview: {
+			fromChain: 8453,
+			toChain: 42161,
+			quote: {
+				action: {
+					fromAmount: '5000000',
+					fromToken: { address: '0xusdc', symbol: 'USDC' },
+				},
+				estimate: {
+					approvalAddress: '0xapproval',
+					gasCosts: [{ amount: '1000', amountUSD: '0.02', token: { symbol: 'ETH' } }],
+				},
+				transactionRequest: { to: '0xrouter', data: '0x1234' },
+			},
+		},
+		wallet: {
+			address: '0xuser',
+			chainId: 8453,
+			nativeBalance: 5000n,
+			allowance: 5000000n,
+		},
+	});
+
+	assert.equal(result.ready, true);
+	assert.equal(result.reason, null);
+	assert.equal(result.allowanceSufficient, true);
+});
+
+test('runExecutionPreflight blocks unsupported cross-chain pairs deterministically', async () => {
+	const { runExecutionPreflight } = await loadExecutionHelpersModule();
+
+	const result = runExecutionPreflight({
+		preview: {
+			fromChain: 8453,
+			toChain: 1,
+			quote: {
+				action: {
+					fromAmount: '5000000',
+					fromToken: { address: '0xusdc', symbol: 'USDC' },
+				},
+				estimate: {
+					approvalAddress: '0xapproval',
+					gasCosts: [{ amount: '1000', amountUSD: '0.02', token: { symbol: 'ETH' } }],
+				},
+				transactionRequest: { to: '0xrouter', data: '0x1234' },
+			},
+		},
+		wallet: {
+			address: '0xuser',
+			chainId: 8453,
+			nativeBalance: 5000n,
+			allowance: 5000000n,
+		},
+	});
+
+	assert.equal(result.ready, false);
+	assert.equal(result.reason, 'blocked_unsupported_cross_chain_pair');
+});
+
 test('buildApproveRequest returns exact-amount ERC20 approve calldata', async () => {
 	const { buildApproveRequest } = await loadExecutionHelpersModule();
 

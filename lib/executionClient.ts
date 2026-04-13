@@ -164,6 +164,8 @@ export async function executePreviewTransaction(input: {
 					'LI.FI quote is missing the approval target required for USDC execution.',
 				blocked_insufficient_gas:
 					'Not enough native gas token is available to submit this transaction.',
+				blocked_unsupported_cross_chain_pair:
+					'This cross-chain USDC Earn pair is not enabled in this version.',
 			};
 			throw new Error(reasonMap[preflight.reason ?? 'blocked_quote_failure']);
 		}

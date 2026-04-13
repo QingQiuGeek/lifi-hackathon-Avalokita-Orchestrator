@@ -247,6 +247,11 @@ export function renderEarnRecommendation(input: {
 		fees: string;
 		routeSource: 'live' | 'fallback';
 		executionDurationSeconds: number | null;
+		executionKind: 'same_chain' | 'cross_chain';
+		bridgeRequired: boolean;
+		destinationChainLabel: string;
+		routeStepsSummary: string[];
+		statusTrackingScope: 'full_route' | 'source_tx_only';
 	};
 	thresholdSatisfied: boolean;
 }): string {
@@ -315,12 +320,21 @@ export function renderEarnRecommendation(input: {
 		[
 			'## Execution Preview',
 			`- Mode: ${input.plan.mode}`,
+			`- Execution kind: ${input.executionPreview.executionKind}`,
 			`- Source chain: ${input.plan.sourceChain}`,
 			`- Target chain: ${input.plan.targetChain}`,
+			`- Destination chain: ${input.executionPreview.destinationChainLabel}`,
 			`- Amount: ${input.plan.amount == null ? 'not provided' : `${input.plan.amount} USDC`}`,
 			`- Route source: ${input.executionPreview.routeSource}`,
+			`- Bridge required: ${input.executionPreview.bridgeRequired ? 'yes' : 'no'}`,
 			`- Estimated fees: ${input.executionPreview.fees}`,
 			`- Estimated duration: ${input.executionPreview.executionDurationSeconds == null ? 'n/a' : `${input.executionPreview.executionDurationSeconds}s`}`,
+			`- Tracking scope: ${input.executionPreview.statusTrackingScope === 'source_tx_only' ? 'source chain transaction only' : 'full route'}`,
+			...(input.executionPreview.routeStepsSummary.length > 0
+				? input.executionPreview.routeStepsSummary.map(
+						(step) => `- Route step: ${step}`,
+					)
+				: []),
 			input.executionPreview.blockingReason
 				? `- Blocking reason: ${input.executionPreview.blockingReason}`
 				: '- Ready for wallet confirmation',
