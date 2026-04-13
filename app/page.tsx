@@ -100,7 +100,7 @@ export default function Home() {
 	}, [currentTheme]);
 
 	return (
-		<div className='min-h-screen relative overflow-x-hidden bg-surface text-on-surface selection:bg-accent-gold/30'>
+		<div className='min-h-screen relative overflow-x-hidden bg-surface dark:bg-stone-950 text-on-surface dark:text-stone-50 selection:bg-accent-gold/30'>
 			<div className='fixed inset-0 pointer-events-none z-0 overflow-hidden'>
 				<motion.div
 					animate={{ rotate: 360 }}

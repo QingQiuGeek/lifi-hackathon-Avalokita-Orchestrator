@@ -21,6 +21,16 @@
 	--font-headline: 'Noto Serif', serif;
 	--font-body: 'Manrope', sans-serif;
 	--font-label: 'Plus Jakarta Sans', sans-serif;
+
+	/* Dark mode colors */
+	--color-surface-dark: #0f172a;
+	--color-surface-container-lowest-dark: #1a202c;
+	--color-surface-container-low-dark: #1e293b;
+	--color-surface-container-dark: #334155;
+	--color-surface-container-high-dark: #475569;
+	--color-on-surface-dark: #f1f5f9;
+	--color-on-surface-variant-dark: #cbd5e1;
+	--color-outline-variant-dark: #64748b;
 }
 
 /* 全局默认颜色 */
