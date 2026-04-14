@@ -24,7 +24,7 @@ type HomeMainContentProps = {
 };
 
 const VIEW_MAP: Record<HomeViewId, MotionConfig> = {
-	agent: {
+	'auto-agent': {
 		initial: { opacity: 0, x: 20 },
 		animate: { opacity: 1, x: 0 },
 		exit: { opacity: 0, x: -20 },

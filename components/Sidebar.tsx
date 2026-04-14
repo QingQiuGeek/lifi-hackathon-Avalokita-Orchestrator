@@ -7,7 +7,6 @@ import {
 	SearchOutlined,
 	ShareAltOutlined,
 } from '@ant-design/icons';
-import favicon from '../app/favicon.ico';
 
 import {
 	Conversations,
@@ -15,10 +14,8 @@ import {
 	type ConversationsProps,
 } from '@ant-design/x';
 import type { MenuProps } from 'antd';
-import { Avatar, Button, Input, message } from 'antd';
+import { Button, Input, message } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
-import Image from 'next/image';
 import {
 	CHAT_FIRST_USER_MESSAGE_EVENT,
 	SIDEBAR_ACTIVE_CONVERSATION_EVENT,
@@ -26,7 +23,6 @@ import {
 	SIDEBAR_REQUEST_NEW_CONVERSATION_EVENT,
 	type ChatFirstUserMessageDetail,
 } from './chatEvents';
-import threeBars from '@/app/three-bars.png';
 import {
 	applyFirstMessageToPendingConversation,
 	createOrReusePendingConversation,
@@ -252,14 +248,15 @@ export default function Sidebar() {
 		>
 			<div className='h-14'></div>
 			<button
-				className='absolute top-4 right-2 z-10 cursor-pointer w-6 h-6 text-[#a4a4a4] hover:bg-[var(--app-hover)] transition-colors rounded'
+				aria-label='toggle sidebar'
+				className='absolute top-4 right-2 z-10 cursor-pointer w-6 h-6 rounded hover:bg-[var(--app-hover)] transition-colors flex items-center justify-center'
 				onClick={() => setIsOpen((prev) => !prev)}
 			>
-				<Image
-					src={threeBars}
-					alt='sidebar toggle'
-					className='theme-adaptive-icon'
-				/>
+				<span className='flex flex-col gap-[3px]'>
+					<span className='block w-3.5 h-[1.5px] rounded-full bg-current' />
+					<span className='block w-3.5 h-[1.5px] rounded-full bg-current' />
+					<span className='block w-3.5 h-[1.5px] rounded-full bg-current' />
+				</span>
 			</button>
 
 			{isOpen && (
