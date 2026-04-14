@@ -1,9 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadTsModule } from './helpers/load-ts-module.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import ts from 'typescript';
 
 async function loadExecutionRuntimeModule() {
-	return loadTsModule('./lib/executionRuntime.ts');
+	const sourcePath = path.resolve('./lib/executionRuntime.ts');
+	const source = fs.readFileSync(sourcePath, 'utf8');
+	const { outputText } = ts.transpileModule(source, {
+		compilerOptions: {
+			module: ts.ModuleKind.ES2022,
+			target: ts.ScriptTarget.ES2022,
+		},
+		fileName: sourcePath,
+	});
+
+	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'execution-runtime-'));
+	const outputPath = path.join(tempDir, 'executionRuntime.mjs');
+	fs.writeFileSync(outputPath, outputText, 'utf8');
+	return import(pathToFileURL(outputPath).href);
 }
 
 test('buildExecutionPreview requires amount before execution can proceed', async () => {
@@ -249,81 +266,6 @@ test('buildExecutionPreview allows supported cross-chain execution when LI.FI re
 	assert.equal(preview.statusTrackingScope, 'source_tx_only');
 	assert.deepEqual(preview.routeStepsSummary, [
 		'Bridge from Base to Arbitrum with StargateV2 (Fast mode)',
-		'Deposit into the target vault with Composer',
-	]);
-});
-
-test('buildExecutionPreview supports Base to Polygon with Polygon route labeling', async () => {
-	const { buildExecutionPreview } = await loadExecutionRuntimeModule();
-
-	const preview = buildExecutionPreview({
-		plan: {
-			intent: 'earn.deposit',
-			asset: 'USDC',
-			amount: 10,
-			sourceChain: 8453,
-			targetChain: 137,
-			minApy: 3,
-			riskPreference: 'medium',
-			needsConfirmation: true,
-			mode: 'execute',
-		},
-		selectedVault: {
-			address: '0xpolygonvault',
-			chainId: 137,
-			name: 'USDC',
-			protocolName: 'aave-v3',
-			underlyingSymbol: 'USDC',
-			underlyingTokenAddress: '0xusdc',
-			apyTotal: 4.2,
-			tvlUsd: 1000000,
-			tags: ['stablecoin'],
-			isTransactional: true,
-			isRedeemable: true,
-			dataSource: 'live',
-		},
-		quote: {
-			action: {
-				fromToken: { address: '0xfrom', symbol: 'USDC' },
-				fromAmount: '10000000',
-			},
-			estimate: {
-				approvalAddress: '0xapproval',
-				toAmount: '9800000',
-				toAmountMin: '9700000',
-				executionDuration: 90,
-				feeCosts: [{ amountUSD: '0.50' }],
-				gasCosts: [{ amountUSD: '0.12', amount: '100', token: { symbol: 'ETH' } }],
-			},
-			transactionRequest: {
-				to: '0xrouter',
-				data: '0x1234',
-			},
-			tool: 'stargateV2',
-			toolDetails: { name: 'StargateV2 (Fast mode)' },
-			includedSteps: [
-				{
-					tool: 'stargateV2',
-					toolDetails: { name: 'StargateV2 (Fast mode)' },
-					action: { fromChainId: 8453, toChainId: 137 },
-				},
-				{
-					tool: 'composer',
-					toolDetails: { name: 'Composer' },
-					action: { fromChainId: 137, toChainId: 137 },
-				},
-			],
-		},
-	});
-
-	assert.equal(preview.canExecute, true);
-	assert.equal(preview.eligibility, 'ready');
-	assert.equal(preview.executionKind, 'cross_chain');
-	assert.equal(preview.bridgeRequired, true);
-	assert.equal(preview.destinationChainLabel, 'Polygon');
-	assert.equal(preview.statusTrackingScope, 'source_tx_only');
-	assert.deepEqual(preview.routeStepsSummary, [
-		'Bridge from Base to Polygon with StargateV2 (Fast mode)',
 		'Deposit into the target vault with Composer',
 	]);
 });

@@ -1,10 +1,6 @@
 import { generateText } from 'ai';
 import { getAgentConfig } from '@/lib/agentConfig';
 import { getModelFromConfig } from '@/lib/agentClient';
-import {
-	formatSupportedBusinessChainNames,
-	formatSupportedBusinessChainsWithIds,
-} from '@/lib/businessChains';
 import { buildPlannerPrompt } from '@/lib/plannerPrompt';
 import {
 	buildPlannerFallback,
@@ -56,7 +52,7 @@ async function planRequest(input: MainAgentInput): Promise<PlannerOutput> {
 				'Return JSON only.',
 				'Supported intents: earn.deposit, bridge, monitor, unknown.',
 				'Supported asset in this version: USDC.',
-				`Supported chains in this version: ${formatSupportedBusinessChainsWithIds()}.`,
+				'Supported chains in this version: Ethereum(1), Base(8453), Arbitrum(42161).',
 				'Use execute mode only when the user clearly asks to proceed now.',
 				'Schema:',
 				'{"intent":"earn.deposit|bridge|monitor|unknown","asset":"USDC","amount":500,"sourceChain":1,"targetChain":8453,"minApy":5,"riskPreference":"low|medium|high","needsConfirmation":true,"mode":"recommend|execute"}',
@@ -74,22 +70,22 @@ function unsupportedIntentMessage(intent: 'bridge' | 'monitor'): string {
 	if (intent === 'bridge') {
 		return [
 			'## Bridge 暂未开放',
-			'当前版本先把 Earn 主链路做稳，Bridge 会在后续阶段恢复。',
+			'当前版本先把 Earn 主线做稳，Bridge 会在下一阶段恢复。',
 			'你现在可以这样问：Find the best USDC vault on Base',
 		].join('\n\n');
 	}
 
 	return [
 		'## Monitor 暂未开放',
-		'当前版本先把 Earn 主链路做稳，Monitor 会在后续阶段恢复。',
+		'当前版本先把 Earn 主线做稳，Monitor 会在后续阶段恢复。',
 		'你现在可以这样问：Find the best USDC vault on Arbitrum',
 	].join('\n\n');
 }
 
 function unknownIntentMessage(): string {
 	return [
-		'我目前只开放了 Earn 主链路。',
-		`支持链：${formatSupportedBusinessChainNames()}。`,
+		'我目前只开放了 Earn 主线。',
+		'支持链：Base、Arbitrum、Ethereum。',
 		'当前演示资产：USDC。',
 		'你可以这样问：put 500 USDC into the safest vault above 5% APY on Arbitrum',
 	].join('\n\n');

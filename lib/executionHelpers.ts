@@ -1,5 +1,4 @@
 import { encodeFunctionData, erc20Abi } from 'viem';
-import { isSupportedCrossChainEarnPair } from './businessChains';
 
 export type ExecutionPreflightResult = {
 	ready: boolean;
@@ -68,6 +67,14 @@ function sumGasAmount(
 	}, BigInt(0));
 }
 
+function isSupportedCrossChainPair(fromChain: number, toChain: number): boolean {
+	return (
+		(fromChain === 1 && (toChain === 8453 || toChain === 42161)) ||
+		(fromChain === 8453 && toChain === 42161) ||
+		(fromChain === 42161 && toChain === 8453)
+	);
+}
+
 export function runExecutionPreflight(input: {
 	preview: MinimalPreview;
 	wallet: WalletExecutionContext;
@@ -80,10 +87,7 @@ export function runExecutionPreflight(input: {
 
 	if (
 		input.preview.fromChain !== input.preview.toChain &&
-		!isSupportedCrossChainEarnPair(
-			input.preview.fromChain,
-			input.preview.toChain,
-		)
+		!isSupportedCrossChainPair(input.preview.fromChain, input.preview.toChain)
 	) {
 		return {
 			ready: false,

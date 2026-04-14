@@ -1,9 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadTsModule } from './helpers/load-ts-module.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import ts from 'typescript';
 
 async function loadPlannerRuntimeModule() {
-	return loadTsModule('./lib/plannerRuntime.ts');
+	const sourcePath = path.resolve('./lib/plannerRuntime.ts');
+	const source = fs.readFileSync(sourcePath, 'utf8');
+	const { outputText } = ts.transpileModule(source, {
+		compilerOptions: {
+			module: ts.ModuleKind.ES2022,
+			target: ts.ScriptTarget.ES2022,
+		},
+		fileName: sourcePath,
+	});
+
+	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'planner-runtime-'));
+	const outputPath = path.join(tempDir, 'plannerRuntime.mjs');
+	fs.writeFileSync(outputPath, outputText, 'utf8');
+	return import(pathToFileURL(outputPath).href);
 }
 
 test('resolveWalletChainId falls back to Base for unsupported chains', async () => {
@@ -12,7 +29,6 @@ test('resolveWalletChainId falls back to Base for unsupported chains', async () 
 	assert.equal(resolveWalletChainId(8453), 8453);
 	assert.equal(resolveWalletChainId(42161), 42161);
 	assert.equal(resolveWalletChainId(1), 1);
-	assert.equal(resolveWalletChainId(137), 8453);
 	assert.equal(resolveWalletChainId(10), 8453);
 });
 
@@ -70,32 +86,6 @@ test('buildPlannerFallback preserves cross-chain source and target chains', asyn
 	assert.equal(plan.intent, 'earn.deposit');
 	assert.equal(plan.sourceChain, 8453);
 	assert.equal(plan.targetChain, 42161);
-});
-
-test('buildPlannerFallback recognizes Polygon as a supported target chain', async () => {
-	const { buildPlannerFallback } = await loadPlannerRuntimeModule();
-
-	const plan = buildPlannerFallback({
-		message: 'find the best usdc vault on polygon',
-		walletChainId: 8453,
-	});
-
-	assert.equal(plan.intent, 'earn.deposit');
-	assert.equal(plan.sourceChain, 8453);
-	assert.equal(plan.targetChain, 137);
-});
-
-test('buildPlannerFallback keeps Base as source for Base to Polygon requests', async () => {
-	const { buildPlannerFallback } = await loadPlannerRuntimeModule();
-
-	const plan = buildPlannerFallback({
-		message: 'move 10 usdc from base into the best usdc vault on polygon',
-		walletChainId: 8453,
-	});
-
-	assert.equal(plan.intent, 'earn.deposit');
-	assert.equal(plan.sourceChain, 8453);
-	assert.equal(plan.targetChain, 137);
 });
 
 test('extractPlannerPayload accepts valid JSON planner output and normalizes chains', async () => {
