@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
 	RainbowKitProvider,
 	ConnectButton,
@@ -25,12 +25,19 @@ export function WalletConnectProvider({
 	children: React.ReactNode;
 }) {
 	const { theme } = useTheme();
+	const [mounted, setMounted] = useState(false);
+
+	useEffect(() => {
+		setMounted(true);
+	}, []);
+
+	const rainbowTheme = mounted && theme === 'dark' ? darkTheme() : lightTheme();
 
 	return (
 		<WagmiProvider config={wagmiConfig}>
 			<QueryClientProvider client={queryClient}>
 				<RainbowKitProvider
-					theme={theme === 'dark' ? darkTheme() : lightTheme()}
+					theme={rainbowTheme}
 					modalSize='compact'
 				>
 					{children}

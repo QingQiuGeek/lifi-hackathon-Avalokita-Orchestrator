@@ -34,18 +34,7 @@ import {
 	type PendingConversationRecord,
 } from '@/lib/conversationRuntime';
 
-const INITIAL_CONVERSATIONS: ConversationRecord[] = [
-	{
-		key: 'conv-1',
-		title: '前端设计系统架构讨论',
-		createdAt: '2026-03-28T18:42:00',
-	},
-	{
-		key: 'conv-2',
-		title: 'Tailwind CSS 与 Styled Components 对比',
-		createdAt: '2026-03-28T14:15:00',
-	},
-];
+const INITIAL_CONVERSATIONS: ConversationRecord[] = [];
 
 function formatConversationTime(isoString: string) {
 	const date = new Date(isoString);
@@ -257,37 +246,21 @@ export default function Sidebar() {
 	return (
 		<nav
 			id='sidebar'
-			className={`flex flex-shrink-0 flex-col [background:var(--app-sidebar)] border-r border-[rgba(255,255,255,0.1)] transition-all duration-300 overflow-hidden ${
-				isOpen ? 'w-[260px]' : 'w-[68px]'
+			className={`relative flex flex-shrink-0 flex-col [background:var(--app-sidebar)] border-r border-[rgba(255,255,255,0.1)] transition-all duration-300 overflow-hidden ${
+				isOpen ? 'w-[120px]' : 'w-[68px]'
 			}`}
 		>
-			<div
-				className={`py-4 flex items-center transition-all duration-300 ${isOpen ? 'px-4 justify-between' : 'justify-center'}`}
+			<div className='h-14'></div>
+			<button
+				className='absolute top-4 right-2 z-10 cursor-pointer w-6 h-6 text-[#a4a4a4] hover:bg-[var(--app-hover)] transition-colors rounded'
+				onClick={() => setIsOpen((prev) => !prev)}
 			>
-				<div
-					className={`items-center gap-2 flex-shrink-0 ${isOpen ? 'flex' : 'hidden'}`}
-				>
-					<div className='h-8 w-8 rounded-full bg-white items-center justify-center flex'>
-						<Avatar
-							size={45}
-							src={favicon.src}
-						/>
-					</div>
-					<span className='text-xl font-semibold text-[var(--app-text)]'>
-						OpenChat
-					</span>
-				</div>
-				<button
-					className='cursor-pointer w-6 h-6 text-[#a4a4a4] hover:bg-[var(--app-hover)] transition-colors '
-					onClick={() => setIsOpen(!isOpen)}
-				>
-					<Image
-						src={threeBars}
-						alt='sidebar toggle'
-						className='theme-adaptive-icon'
-					/>
-				</button>
-			</div>
+				<Image
+					src={threeBars}
+					alt='sidebar toggle'
+					className='theme-adaptive-icon'
+				/>
+			</button>
 
 			{isOpen && (
 				<>
