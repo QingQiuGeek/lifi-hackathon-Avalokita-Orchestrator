@@ -2,7 +2,9 @@
   English | <a href="./README.zh-CN.md">简体中文</a>
 </p>
 
-![](./app/logo.jpg)
+<p align="center">
+  <img src="./app/logo.jpg" alt="Logo" />
+</p>
 
 # Avalokita
 
