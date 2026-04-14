@@ -1,4 +1,5 @@
 import { parseUnits } from 'viem';
+import { getUsdcAddress } from './businessChains';
 import {
 	buildRecommendationSummary,
 	buildVaultDisplayName,
@@ -11,12 +12,6 @@ import {
 } from './lifiRuntime';
 import { createLifiClient } from './lifiClient';
 import type { ExecutionQuote } from './executionRuntime';
-
-export const USDC_TOKEN_BY_CHAIN: Record<number, string> = {
-	1: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-	8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-	42161: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-};
 
 export type SearchVaultsResult =
 	| {
@@ -161,7 +156,7 @@ export async function buildDepositQuote(input: {
 	targetVaultAddress: string;
 }): Promise<BuildQuoteResult> {
 	try {
-		const fromToken = USDC_TOKEN_BY_CHAIN[input.sourceChainId];
+		const fromToken = getUsdcAddress(input.sourceChainId);
 		if (!fromToken) {
 			return {
 				success: false,
@@ -334,6 +329,13 @@ export function renderEarnRecommendation(input: {
 				? input.executionPreview.routeStepsSummary.map(
 						(step) => `- Route step: ${step}`,
 					)
+				: []),
+			...(input.executionPreview.executionKind === 'cross_chain' &&
+			input.plan.targetChain === 137
+				? [
+						'- This version does not include destination-chain gas refueling.',
+						'- You may still need POL for manual transactions on Polygon after the route completes.',
+					]
 				: []),
 			input.executionPreview.blockingReason
 				? `- Blocking reason: ${input.executionPreview.blockingReason}`

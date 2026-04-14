@@ -1,3 +1,8 @@
+import {
+	getChainLabel,
+	isSupportedCrossChainEarnPair,
+} from './businessChains';
+
 export type ExecutionEligibility =
 	| 'ready'
 	| 'blocked_missing_amount'
@@ -119,29 +124,8 @@ function hasValidAmount(amount: number | null): amount is number {
 	return typeof amount === 'number' && Number.isFinite(amount) && amount > 0;
 }
 
-function chainLabel(chainId: number): string {
-	switch (chainId) {
-		case 1:
-			return 'Ethereum';
-		case 42161:
-			return 'Arbitrum';
-		case 8453:
-			return 'Base';
-		default:
-			return `Chain ${chainId}`;
-	}
-}
-
 function getExecutionKind(fromChain: number, toChain: number): ExecutionKind {
 	return fromChain === toChain ? 'same_chain' : 'cross_chain';
-}
-
-function isSupportedCrossChainPair(fromChain: number, toChain: number): boolean {
-	return (
-		(fromChain === 1 && (toChain === 8453 || toChain === 42161)) ||
-		(fromChain === 8453 && toChain === 42161) ||
-		(fromChain === 42161 && toChain === 8453)
-	);
 }
 
 function summarizeRouteSteps(input: {
@@ -163,7 +147,7 @@ function summarizeRouteSteps(input: {
 				typeof step.action?.toChainId === 'number' &&
 				step.action.fromChainId !== step.action.toChainId
 			) {
-				return `Bridge from ${chainLabel(step.action.fromChainId)} to ${chainLabel(step.action.toChainId)} with ${toolName}`;
+				return `Bridge from ${getChainLabel(step.action.fromChainId)} to ${getChainLabel(step.action.toChainId)} with ${toolName}`;
 			}
 
 			if (step.action?.toToken?.symbol) {
@@ -179,7 +163,7 @@ function summarizeRouteSteps(input: {
 
 	return input.executionKind === 'cross_chain'
 		? [
-				`Bridge from ${chainLabel(input.fromChain)} to ${chainLabel(input.toChain)}`,
+				`Bridge from ${getChainLabel(input.fromChain)} to ${getChainLabel(input.toChain)}`,
 				'Deposit into the target vault',
 			]
 		: ['Deposit into the target vault'];
@@ -245,7 +229,7 @@ export function buildExecutionPreview(input: PreviewInput): ExecutionPreview {
 		input.plan.targetChain,
 	);
 	const bridgeRequired = executionKind === 'cross_chain';
-	const destinationChainLabel = chainLabel(input.plan.targetChain);
+	const destinationChainLabel = getChainLabel(input.plan.targetChain);
 	const statusTrackingScope: StatusTrackingScope =
 		executionKind === 'cross_chain' ? 'source_tx_only' : 'full_route';
 	const routeStepsSummary = summarizeRouteSteps({
@@ -287,7 +271,10 @@ export function buildExecutionPreview(input: PreviewInput): ExecutionPreview {
 
 	if (
 		executionKind === 'cross_chain' &&
-		!isSupportedCrossChainPair(input.plan.sourceChain, input.plan.targetChain)
+		!isSupportedCrossChainEarnPair(
+			input.plan.sourceChain,
+			input.plan.targetChain,
+		)
 	) {
 		return {
 			canExecute: false,
