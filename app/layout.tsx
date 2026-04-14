@@ -12,7 +12,7 @@ export default async function RootLayout({
 			lang='en'
 			suppressHydrationWarning
 		>
-			<body className='h-full w-full m-0 p-0 overflow-x-hidden'>
+			<body className='h-full w-full m-0 p-0 overflow-hidden'>
 				<Providers>
 					<AntdRegistry>{children}</AntdRegistry>
 				</Providers>

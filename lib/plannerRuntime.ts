@@ -1,4 +1,13 @@
-export const SUPPORTED_WALLET_CHAIN_IDS = [1, 8453, 42161] as const;
+import {
+	getPlannerAliasesByChain,
+	isSupportedEarnChain,
+	isSupportedEarnTargetChain,
+	SUPPORTED_EARN_CHAIN_IDS,
+	type BusinessChainId,
+	type EarnTargetChainId,
+} from './businessChains';
+
+export const SUPPORTED_WALLET_CHAIN_IDS = SUPPORTED_EARN_CHAIN_IDS;
 export const DEFAULT_WALLET_CHAIN_ID = 8453;
 
 export type SupportedWalletChainId =
@@ -12,7 +21,7 @@ export type PlannerOutput = {
 	asset: 'USDC';
 	amount: number | null;
 	sourceChain: SupportedWalletChainId;
-	targetChain: SupportedWalletChainId;
+	targetChain: EarnTargetChainId;
 	minApy: number | null;
 	riskPreference: RiskPreference;
 	needsConfirmation: boolean;
@@ -57,71 +66,60 @@ function includesAny(message: string, patterns: string[]): boolean {
 	return patterns.some((pattern) => message.includes(pattern));
 }
 
-function parseChainByName(message: string): SupportedWalletChainId | null {
+function parseChainByName(message: string): EarnTargetChainId | null {
 	const lowered = message.toLowerCase();
-	if (lowered.includes('arbitrum')) {
-		return 42161;
+	for (const { chainId, aliases } of getPlannerAliasesByChain()) {
+		if (
+			isSupportedEarnTargetChain(chainId) &&
+			aliases.some((alias) => lowered.includes(alias))
+		) {
+			return chainId;
+		}
 	}
-	if (lowered.includes('ethereum')) {
-		return 1;
-	}
-	if (lowered.includes('base')) {
-		return 8453;
+
+	return null;
+}
+
+function parsePrefixedChain(
+	message: string,
+	prefixes: string[],
+	filter: (chainId: BusinessChainId) => boolean,
+): BusinessChainId | null {
+	const lowered = message.toLowerCase();
+
+	for (const { chainId, aliases } of getPlannerAliasesByChain()) {
+		if (!filter(chainId)) {
+			continue;
+		}
+
+		for (const alias of aliases) {
+			if (prefixes.some((prefix) => lowered.includes(`${prefix} ${alias}`))) {
+				return chainId;
+			}
+		}
 	}
 
 	return null;
 }
 
 function parseSourceChain(message: string): SupportedWalletChainId | null {
-	const lowered = message.toLowerCase();
-	if (lowered.includes('from arbitrum')) {
-		return 42161;
-	}
-	if (lowered.includes('from ethereum')) {
-		return 1;
-	}
-	if (lowered.includes('from base')) {
-		return 8453;
-	}
-
-	return null;
+	const chainId = parsePrefixedChain(message, ['from'], isSupportedEarnChain);
+	return chainId != null && isSupportedEarnChain(chainId) ? chainId : null;
 }
 
-function parseTargetChain(message: string): SupportedWalletChainId | null {
-	const lowered = message.toLowerCase();
-	if (
-		lowered.includes('on arbitrum') ||
-		lowered.includes('into arbitrum') ||
-		lowered.includes('to arbitrum')
-	) {
-		return 42161;
-	}
-	if (
-		lowered.includes('on ethereum') ||
-		lowered.includes('into ethereum') ||
-		lowered.includes('to ethereum')
-	) {
-		return 1;
-	}
-	if (
-		lowered.includes('on base') ||
-		lowered.includes('into base') ||
-		lowered.includes('to base')
-	) {
-		return 8453;
-	}
-
-	return null;
+function parseTargetChain(message: string): EarnTargetChainId | null {
+	return parsePrefixedChain(
+		message,
+		['on', 'into', 'to'],
+		isSupportedEarnTargetChain,
+	);
 }
 
 export function resolveWalletChainId(
 	chainId: number | null | undefined,
 ): SupportedWalletChainId {
-	if (
-		typeof chainId === 'number' &&
-		SUPPORTED_WALLET_CHAIN_IDS.includes(chainId as SupportedWalletChainId)
-	) {
-		return chainId as SupportedWalletChainId;
+	if (typeof chainId === 'number' && isSupportedEarnChain(chainId)) {
+		return chainId;
 	}
 
 	return DEFAULT_WALLET_CHAIN_ID;
@@ -218,7 +216,11 @@ export function extractPlannerPayload(
 	try {
 		const parsed = JSON.parse(jsonMatch[0]) as Partial<PlannerOutput>;
 		const sourceChain = resolveWalletChainId(parsed.sourceChain ?? walletChainId);
-		const targetChain = resolveWalletChainId(parsed.targetChain ?? sourceChain);
+		const targetChain =
+			typeof parsed.targetChain === 'number' &&
+			isSupportedEarnTargetChain(parsed.targetChain)
+				? parsed.targetChain
+				: sourceChain;
 		const mode: PlannerMode =
 			parsed.mode === 'execute' ? 'execute' : 'recommend';
 		const riskPreference: RiskPreference =
