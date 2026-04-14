@@ -1,27 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
-import ts from 'typescript';
+import { loadTsModule } from './helpers/load-ts-module.mjs';
 
 async function loadExecutionHelpersModule() {
-	const sourcePath = path.resolve('./lib/executionHelpers.ts');
-	const source = fs.readFileSync(sourcePath, 'utf8');
-	const { outputText } = ts.transpileModule(source, {
-		compilerOptions: {
-			module: ts.ModuleKind.ES2022,
-			target: ts.ScriptTarget.ES2022,
-		},
-		fileName: sourcePath,
-	});
-
-	const tempRoot = path.resolve('./.codex-test-tmp');
-	fs.mkdirSync(tempRoot, { recursive: true });
-	const tempDir = fs.mkdtempSync(path.join(tempRoot, 'execution-helpers-'));
-	const outputPath = path.join(tempDir, 'executionHelpers.mjs');
-	fs.writeFileSync(outputPath, outputText, 'utf8');
-	return import(pathToFileURL(outputPath).href);
+	return loadTsModule('./lib/executionHelpers.ts');
 }
 
 test('runExecutionPreflight returns ready when wallet, gas, allowance, and approval target are valid', async () => {
