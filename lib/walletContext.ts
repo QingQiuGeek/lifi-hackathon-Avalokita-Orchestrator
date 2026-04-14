@@ -1,4 +1,8 @@
-import { getChainLabel } from './businessChains';
+const SUPPORTED_CHAIN_LABELS: Record<number, string> = {
+	1: 'Ethereum',
+	8453: 'Base',
+	42161: 'Arbitrum',
+};
 
 export function isWalletContextQuestion(message: string): boolean {
 	const lowered = message.toLowerCase();
@@ -15,7 +19,9 @@ export function buildWalletContextResponse(input: {
 	userAddress: string;
 	walletChainId: number;
 }): string {
-	const chainLabel = getChainLabel(input.walletChainId);
+	const chainLabel =
+		SUPPORTED_CHAIN_LABELS[input.walletChainId] ??
+		`Chain ${input.walletChainId}`;
 
 	return [
 		'## Wallet Context',

@@ -1,11 +1,22 @@
 'use client';
 
 import { Button } from 'antd';
-import { getChainLabel } from '@/lib/businessChains';
 import type { ExecutionPreview } from '@/lib/executionRuntime';
 import type { NormalizedVaultCandidate } from '@/lib/lifiRuntime';
 import type { PlannerOutput } from '@/lib/plannerRuntime';
 import type { ClientExecutionState } from '@/lib/executionClient';
+
+function chainLabel(chainId: number): string {
+	switch (chainId) {
+		case 1:
+			return 'Ethereum';
+		case 42161:
+			return 'Arbitrum';
+		case 8453:
+		default:
+			return 'Base';
+	}
+}
 
 function renderExecutionStatus(
 	status: ClientExecutionState['status'],
@@ -73,16 +84,11 @@ export default function ExecutionPreviewCard({
 				<div>Protocol: {selectedVault?.protocolName ?? 'Unknown'}</div>
 				<div>Execution kind: {preview.executionKind}</div>
 				<div>
-					Route: {getChainLabel(preview.fromChain)} {'->'}{' '}
-					{getChainLabel(preview.toChain)}
+					Route: {chainLabel(preview.fromChain)} {'->'}{' '}
+					{chainLabel(preview.toChain)}
 				</div>
 				<div>Destination chain: {preview.destinationChainLabel}</div>
 				<div>Bridge required: {preview.bridgeRequired ? 'yes' : 'no'}</div>
-				{preview.executionKind === 'cross_chain' && preview.toChain === 137 ? (
-					<div className='rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sky-900'>
-						This version does not include destination-chain gas refueling. You may still need POL for manual transactions on Polygon later.
-					</div>
-				) : null}
 				<div>
 					Amount: {preview.fromAmount ? `${preview.fromAmount} ${preview.fromToken}` : 'Not provided'}
 				</div>
