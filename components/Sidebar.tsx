@@ -16,8 +16,6 @@ import {
 import type { MenuProps } from 'antd';
 import { Button, Input, message } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
-import Image from 'next/image';
 import {
 	CHAT_FIRST_USER_MESSAGE_EVENT,
 	SIDEBAR_ACTIVE_CONVERSATION_EVENT,
@@ -25,7 +23,6 @@ import {
 	SIDEBAR_REQUEST_NEW_CONVERSATION_EVENT,
 	type ChatFirstUserMessageDetail,
 } from './chatEvents';
-import threeBars from '@/app/three-bars.png';
 import {
 	applyFirstMessageToPendingConversation,
 	createOrReusePendingConversation,
@@ -245,24 +242,22 @@ export default function Sidebar() {
 	return (
 		<nav
 			id='sidebar'
-			className={`flex flex-shrink-0 flex-col [background:var(--app-sidebar)] border-r border-[rgba(255,255,255,0.1)] transition-all duration-300 overflow-hidden ${
-				isOpen ? 'w-[150px]' : 'w-[68px]'
+			className={`relative flex flex-shrink-0 flex-col [background:var(--app-sidebar)] border-r border-[rgba(255,255,255,0.1)] transition-all duration-300 overflow-hidden ${
+				isOpen ? 'w-[120px]' : 'w-[68px]'
 			}`}
 		>
-			<div
-				className={`py-4 flex items-center transition-all duration-300 ${isOpen ? 'px-4 justify-end' : 'justify-center'}`}
+			<div className='h-14'></div>
+			<button
+				aria-label='toggle sidebar'
+				className='absolute top-4 right-2 z-10 cursor-pointer w-6 h-6 rounded hover:bg-[var(--app-hover)] transition-colors flex items-center justify-center'
+				onClick={() => setIsOpen((prev) => !prev)}
 			>
-				<button
-					className='cursor-pointer w-6 h-6 text-[#a4a4a4] hover:bg-[var(--app-hover)] transition-colors '
-					onClick={() => setIsOpen(!isOpen)}
-				>
-					<Image
-						src={threeBars}
-						alt='sidebar toggle'
-						className='theme-adaptive-icon'
-					/>
-				</button>
-			</div>
+				<span className='flex flex-col gap-[3px]'>
+					<span className='block w-3.5 h-[1.5px] rounded-full bg-current' />
+					<span className='block w-3.5 h-[1.5px] rounded-full bg-current' />
+					<span className='block w-3.5 h-[1.5px] rounded-full bg-current' />
+				</span>
+			</button>
 
 			{isOpen && (
 				<>
