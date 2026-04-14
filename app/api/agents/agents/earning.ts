@@ -2,11 +2,6 @@ import { generateText } from 'ai';
 import { getAgentConfig } from '@/lib/agentConfig';
 import { getModelFromConfig } from '@/lib/agentClient';
 import { createAgentStepEvent, type AgentStepEvent } from '@/lib/agentSteps';
-import {
-	formatSupportedBusinessChainsWithIds,
-	formatSupportedCrossChainEarnTargetsWithIds,
-	getChainLabel,
-} from '@/lib/businessChains';
 import { buildExecutionPreview, type ExecutionPreview } from '@/lib/executionRuntime';
 import {
 	buildVaultDisplayName,
@@ -14,6 +9,7 @@ import {
 	type NormalizedPortfolioPosition,
 } from '@/lib/lifiRuntime';
 import type { PlannerOutput } from '@/lib/plannerRuntime';
+import { SUPPORTED_CHAINS } from '@/lib/chains';
 import { buildDepositQuote, renderEarnRecommendation } from '@/lib/lifiDomain';
 import {
 	createEarnAgentTools,
@@ -52,7 +48,10 @@ type EarnRuntimeState = {
 };
 
 function chainName(chainId: number): string {
-	return getChainLabel(chainId);
+	return (
+		SUPPORTED_CHAINS[chainId as keyof typeof SUPPORTED_CHAINS]?.name ||
+		`Chain ${chainId}`
+	);
 }
 
 function buildEarnPrompt(input: EarningAgentInput): string {
@@ -75,13 +74,13 @@ function buildEarnSystemPrompt(): string {
 	return [
 		'You are the LI.FI AI Earn agent for a USDC-focused DeFi assistant.',
 		'You must call tools to gather facts before recommending anything.',
-		`Only support USDC on ${formatSupportedBusinessChainsWithIds()}.`,
+		'Only support USDC on Ethereum (1), Base (8453), and Arbitrum (42161).',
 		'Always call listVaults before making a recommendation.',
 		'Call getPortfolio only if wallet context helps explain the recommendation.',
 		'Call getVaultDetail only when you need extra facts about a candidate vault.',
 		'If the user provided an amount, call buildComposerQuote after you know the selected vault address.',
 		'For cross-chain Earn requests, search vaults on the target chain first and only then build the quote from the source chain into that target vault.',
-		`Only support cross-chain Earn into ${formatSupportedCrossChainEarnTargetsWithIds()}. Requests targeting other chains across chains must be treated as unsupported.`,
+		'Only support cross-chain Earn into Base (8453) or Arbitrum (42161). Requests targeting Ethereum across chains must be treated as unsupported.',
 		'Never describe a cross-chain route as fully completed on the destination chain. At most, the app confirms the source-chain route transaction.',
 		'You may call estimateYield to explain projected returns.',
 		'Never invent vault names, APY, TVL, fee, or quote data.',

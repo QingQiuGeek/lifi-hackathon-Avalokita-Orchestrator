@@ -1,9 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadTsModule } from './helpers/load-ts-module.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import ts from 'typescript';
 
 async function loadWalletContextModule() {
-	return loadTsModule('./lib/walletContext.ts');
+	const sourcePath = path.resolve('./lib/walletContext.ts');
+	const source = fs.readFileSync(sourcePath, 'utf8');
+	const { outputText } = ts.transpileModule(source, {
+		compilerOptions: {
+			module: ts.ModuleKind.ES2022,
+			target: ts.ScriptTarget.ES2022,
+		},
+		fileName: sourcePath,
+	});
+
+	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wallet-context-'));
+	const outputPath = path.join(tempDir, 'walletContext.mjs');
+	fs.writeFileSync(outputPath, outputText, 'utf8');
+	return import(pathToFileURL(outputPath).href);
 }
 
 test('wallet context helpers detect address questions and format a deterministic response', async () => {

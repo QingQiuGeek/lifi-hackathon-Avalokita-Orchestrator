@@ -1,6 +1,5 @@
 import { getPublicClient, getWalletClient } from '@wagmi/core';
 import { erc20Abi, type Address, type Hex } from 'viem';
-import { getExplorerTxBaseUrl } from './businessChains';
 import {
 	buildApproveRequest,
 	runExecutionPreflight,
@@ -42,8 +41,20 @@ type QuoteTransactionRequest = {
 
 const RECEIPT_TIMEOUT_MS = 120_000;
 
+function explorerBaseUrl(chainId: number): string {
+	switch (chainId) {
+		case 1:
+			return 'https://etherscan.io/tx/';
+		case 42161:
+			return 'https://arbiscan.io/tx/';
+		case 8453:
+		default:
+			return 'https://basescan.org/tx/';
+	}
+}
+
 function toExplorerLink(chainId: number, hash: string) {
-	return `${getExplorerTxBaseUrl(chainId)}${hash}`;
+	return `${explorerBaseUrl(chainId)}${hash}`;
 }
 
 function toHashes(state: {
