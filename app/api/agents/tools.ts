@@ -9,6 +9,7 @@ import {
 	type SearchVaultsResult,
 } from '@/lib/lifiDomain';
 import { createAgentStepEvent, type AgentStepEvent } from '@/lib/agentSteps';
+import { getChainLabel } from '@/lib/businessChains';
 import type { ExecutionQuote } from '@/lib/executionRuntime';
 import { summarizeVaultSearchOutcome } from '@/lib/lifiRuntime';
 import type { PlannerOutput } from '@/lib/plannerRuntime';
@@ -119,18 +120,6 @@ type EarnToolContext = {
 	callbacks?: EarnToolCallbacks;
 };
 
-function chainLabel(chainId: number): string {
-	switch (chainId) {
-		case 1:
-			return 'Ethereum';
-		case 42161:
-			return 'Arbitrum';
-		case 8453:
-		default:
-			return 'Base';
-	}
-}
-
 function emitToolStep(
 	callbacks: EarnToolCallbacks | undefined,
 	event: AgentStepEvent,
@@ -163,7 +152,7 @@ function buildListVaultsSummary(input: {
 	selectedVault: ListVaultsToolData['selectedVault'];
 }) {
 	return summarizeVaultSearchOutcome({
-		chainName: chainLabel(input.chainId),
+		chainName: getChainLabel(input.chainId),
 		token: input.token,
 		totalVaultCount: input.result.success ? input.result.vaults.length : 0,
 		matchingTokenCount: input.count,
@@ -232,7 +221,7 @@ export async function runListVaults(
 		createAgentStepEvent(
 			stepKey,
 			'running',
-			`Searching live ${token} vaults on ${chainLabel(chainId)}.`,
+			`Searching live ${token} vaults on ${getChainLabel(chainId)}.`,
 		),
 	);
 
@@ -244,7 +233,7 @@ export async function runListVaults(
 	if (!result.success) {
 		const failure = failureResult<ListVaultsToolData>(
 			result.error,
-			`Live vault search failed on ${chainLabel(chainId)}: ${result.error}`,
+			`Live vault search failed on ${getChainLabel(chainId)}: ${result.error}`,
 		);
 		emitToolStep(
 			context.callbacks,
@@ -304,7 +293,7 @@ export async function runGetVaultDetail(
 	if (!vault) {
 		const failure = failureResult<VaultDetailToolData>(
 			'Vault detail not found in the current live vault dataset.',
-			`Vault detail lookup failed for ${input.vaultAddress} on ${chainLabel(input.chainId)}.`,
+			`Vault detail lookup failed for ${input.vaultAddress} on ${getChainLabel(input.chainId)}.`,
 		);
 		emitToolResult(context.callbacks, 'getVaultDetail', failure);
 		return failure;
@@ -339,7 +328,7 @@ export async function runGetPortfolio(
 		createAgentStepEvent(
 			'portfolio_check',
 			'running',
-			`Checking wallet positions on ${chainLabel(input.chainId)}.`,
+			`Checking wallet positions on ${getChainLabel(input.chainId)}.`,
 		),
 	);
 
@@ -368,8 +357,8 @@ export async function runGetPortfolio(
 			totalApy: '0',
 		},
 		positions.length > 0
-			? `Found ${positions.length} matching wallet positions on ${chainLabel(input.chainId)}.`
-			: `No matching wallet positions found on ${chainLabel(input.chainId)}.`,
+			? `Found ${positions.length} matching wallet positions on ${getChainLabel(input.chainId)}.`
+			: `No matching wallet positions found on ${getChainLabel(input.chainId)}.`,
 	);
 	emitToolStep(
 		context.callbacks,
@@ -394,7 +383,7 @@ export async function runBuildComposerQuote(
 		createAgentStepEvent(
 			'quote_build',
 			'running',
-			`Building LI.FI quote for ${input.amount} USDC from ${chainLabel(input.fromChain)} to ${chainLabel(input.toChain)}.`,
+			`Building LI.FI quote for ${input.amount} USDC from ${getChainLabel(input.fromChain)} to ${getChainLabel(input.toChain)}.`,
 		),
 	);
 
@@ -489,7 +478,9 @@ export function createEarnAgentTools(context: EarnToolContext) {
 			parameters: z.object({
 				chainId: z
 					.number()
-					.describe('The target chain ID (1=Ethereum, 8453=Base, 42161=Arbitrum).'),
+					.describe(
+						'The target chain ID for the LI.FI Earn search, for example 8453 for Base or 137 for Polygon.',
+					),
 				token: z.string().optional().describe('Underlying token symbol, e.g. USDC.'),
 				minApy: z.number().optional().describe('Minimum target APY threshold.'),
 				limit: z.number().optional().describe('Maximum number of ranked results.'),
