@@ -79,6 +79,40 @@ test('createLifiClient builds the quote request against li.quest', async () => {
 	assert.equal(calls[0].init?.cache, 'no-store');
 });
 
+test('createLifiClient builds the status request against li.quest', async () => {
+	const calls = [];
+	const { createLifiClient } = await loadLifiClientModule();
+	const client = createLifiClient(async (url, init) => {
+		calls.push({ url: String(url), init });
+		return new Response(
+			JSON.stringify({
+				status: 'DONE',
+				substatus: 'REFUNDED',
+			}),
+			{
+				status: 200,
+				headers: { 'content-type': 'application/json' },
+			},
+		);
+	});
+
+	const result = await client.getStatus({
+		txHash: '0xabc',
+		fromChain: 8453,
+		toChain: 137,
+		bridge: 'relaydepository',
+	});
+
+	assert.equal(result.success, true);
+	assert.equal(calls.length, 1);
+	assert.match(calls[0].url, /https:\/\/li\.quest\/v1\/status\?/);
+	assert.match(calls[0].url, /txHash=0xabc/);
+	assert.match(calls[0].url, /fromChain=8453/);
+	assert.match(calls[0].url, /toChain=137/);
+	assert.match(calls[0].url, /bridge=relaydepository/);
+	assert.equal(calls[0].init?.cache, 'no-store');
+});
+
 test('createLifiClient includes the server-side LI.FI API key header when configured', async () => {
 	const calls = [];
 	process.env.LIFI_API_KEY = 'server-secret';

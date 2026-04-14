@@ -50,6 +50,20 @@ export type BuildQuoteResult =
 
 const lifiClient = createLifiClient();
 
+function getQuoteExecutionFailure(input: {
+	quote: ExecutionQuote;
+}): string | null {
+	if (!input.quote.estimate?.approvalAddress) {
+		return 'LI.FI quote is missing the approval target required for ERC20 execution.';
+	}
+
+	if (!input.quote.transactionRequest?.to || !input.quote.transactionRequest?.data) {
+		return 'LI.FI quote did not return executable transaction data for this vault.';
+	}
+
+	return null;
+}
+
 export async function searchVaults(input: {
 	chainId: number;
 	limit?: number;
@@ -182,9 +196,20 @@ export async function buildDepositQuote(input: {
 			};
 		}
 
+		const quote = response.data as ExecutionQuote;
+		const quoteFailure = getQuoteExecutionFailure({
+			quote,
+		});
+		if (quoteFailure) {
+			return {
+				success: false,
+				error: quoteFailure,
+			};
+		}
+
 		return {
 			success: true,
-			quote: response.data as ExecutionQuote,
+			quote,
 		};
 	} catch (error) {
 		return {
@@ -249,6 +274,7 @@ export function renderEarnRecommendation(input: {
 		statusTrackingScope: 'full_route' | 'source_tx_only';
 	};
 	thresholdSatisfied: boolean;
+	selectionNote?: string;
 }): string {
 	const sections: string[] = [];
 
@@ -273,6 +299,10 @@ export function renderEarnRecommendation(input: {
 			`- Transactional: ${input.selectedVault.isTransactional ? 'yes' : 'no'}`,
 			`- Risk preference: ${input.plan.riskPreference}`,
 		];
+
+		if (input.selectionNote) {
+			reasons.push(`- Selection note: ${input.selectionNote}`);
+		}
 
 		if (input.plan.minApy != null && !input.thresholdSatisfied) {
 			reasons.push(
