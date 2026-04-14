@@ -54,3 +54,10 @@ test('renderEarnRecommendation adds destination gas disclaimer for cross-chain P
 	assert.match(text, /destination-chain gas refueling/i);
 	assert.match(text, /may still need POL/i);
 });
+
+test('lifiDomain no longer exposes route guard helpers for Base to Polygon deny logic', async () => {
+	const module = await loadLifiDomainModule();
+
+	assert.equal(module.getQuoteRouteGuardParams, undefined);
+	assert.equal(module.assessQuoteRouteRisk, undefined);
+});

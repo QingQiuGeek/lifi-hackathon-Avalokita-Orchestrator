@@ -118,6 +118,7 @@ type PreviewInput = {
 		dataSource: 'live' | 'fallback';
 	};
 	quote: ExecutionQuote | null;
+	quoteFailureReason?: string | null;
 };
 
 function hasValidAmount(amount: number | null): amount is number {
@@ -309,7 +310,9 @@ export function buildExecutionPreview(input: PreviewInput): ExecutionPreview {
 		return {
 			canExecute: false,
 			eligibility: 'blocked_quote_failure',
-			blockingReason: 'Live LI.FI quote data is unavailable right now.',
+			blockingReason:
+				input.quoteFailureReason?.trim() ||
+				'Live LI.FI quote data is unavailable right now.',
 			routeSource: input.selectedVault.dataSource,
 			fromChain: input.plan.sourceChain,
 			toChain: input.plan.targetChain,

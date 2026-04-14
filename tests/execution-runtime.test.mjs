@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { loadTsModule } from './helpers/load-ts-module.mjs';
 
 async function loadExecutionRuntimeModule() {
@@ -176,6 +178,60 @@ test('buildExecutionPreview marks missing quote as blocked quote failure when am
 	assert.equal(preview.canExecute, false);
 	assert.equal(preview.eligibility, 'blocked_quote_failure');
 	assert.match(preview.blockingReason ?? '', /quote/i);
+});
+
+test('buildExecutionPreview surfaces quote failure reasons when quote is unavailable', async () => {
+	const { buildExecutionPreview } = await loadExecutionRuntimeModule();
+
+	const preview = buildExecutionPreview({
+		plan: {
+			intent: 'earn.deposit',
+			asset: 'USDC',
+			amount: 0.1,
+			sourceChain: 8453,
+			targetChain: 137,
+			minApy: 3,
+			riskPreference: 'medium',
+			needsConfirmation: true,
+			mode: 'execute',
+		},
+		selectedVault: {
+			address: '0xpolygonvault',
+			chainId: 137,
+			name: 'USDC',
+			protocolName: 'aave-v3',
+			underlyingSymbol: 'USDC',
+			underlyingTokenAddress: '0xusdc',
+			apyTotal: 4.2,
+			tvlUsd: 1000000,
+			tags: ['stablecoin'],
+			isTransactional: true,
+			isRedeemable: true,
+			dataSource: 'live',
+		},
+		quote: null,
+		quoteFailureReason:
+			'Current Base -> Polygon demo blocks LI.FI routes that rely on relaydepository, fly, or custom intermediate steps.',
+	});
+
+	assert.equal(preview.canExecute, false);
+	assert.equal(preview.eligibility, 'blocked_quote_failure');
+	assert.match(preview.blockingReason ?? '', /Base -> Polygon/i);
+	assert.match(preview.blockingReason ?? '', /relaydepository/i);
+});
+
+test('earning agent forwards raw quote failures into the execution preview builder', () => {
+	const source = fs.readFileSync(
+		path.resolve(
+			'./app/api/agents/agents/earning.ts',
+		),
+		'utf8',
+	);
+
+	assert.match(
+		source,
+		/quoteFailureReason:\s*runtimeState\.quote\?\.success === false\s*\?\s*runtimeState\.quote\.error\s*:\s*undefined/,
+	);
 });
 
 test('buildExecutionPreview allows supported cross-chain execution when LI.FI returns route data', async () => {

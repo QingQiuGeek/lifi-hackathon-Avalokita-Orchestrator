@@ -8,9 +8,10 @@ import type { PlannerOutput } from '@/lib/plannerRuntime';
 import type { ClientExecutionState } from '@/lib/executionClient';
 
 function renderExecutionStatus(
-	status: ClientExecutionState['status'],
+	executionState: ClientExecutionState,
 	preview?: ExecutionPreview,
 ) {
+	const { status, routeStatus } = executionState;
 	const isCrossChain = preview?.executionKind === 'cross_chain';
 
 	switch (status) {
@@ -32,11 +33,19 @@ function renderExecutionStatus(
 				: 'Deposit signed, waiting for on-chain confirmation';
 		case 'submitted':
 			return isCrossChain ? 'Route transaction submitted' : 'Deposit transaction submitted';
+		case 'tracking_route':
+			return 'Source-chain route confirmed, tracking final LI.FI status';
 		case 'confirmed':
+			if (isCrossChain && routeStatus === 'partial') {
+				return 'Route completed with alternate asset';
+			}
 			return isCrossChain
-				? 'Source-chain route confirmed'
+				? 'Cross-chain route completed'
 				: 'Deposit confirmed on chain';
 		case 'failed':
+			if (routeStatus === 'refunded') {
+				return 'Route failed and was refunded';
+			}
 			return 'Execution failed';
 		case 'idle':
 		default:
@@ -123,6 +132,20 @@ export default function ExecutionPreviewCard({
 						? 'Source chain transaction only'
 						: 'Full route'}
 				</div>
+				{executionState?.routeStatus ? (
+					<div>Final route outcome: {executionState.routeStatus}</div>
+				) : null}
+				{executionState?.routeReceivingTokenSymbol || executionState?.routeReceivingChainId ? (
+					<div>
+						Actual LI.FI result:{' '}
+						{executionState.routeReceivingTokenSymbol
+							? `${executionState.routeReceivingTokenSymbol} on `
+							: ''}
+						{executionState.routeReceivingChainId != null
+							? getChainLabel(executionState.routeReceivingChainId)
+							: 'reported destination'}
+					</div>
+				) : null}
 				{preview.routeStepsSummary.length > 0 ? (
 					<div>
 						Route steps: {preview.routeStepsSummary.join(' | ')}
@@ -142,9 +165,21 @@ export default function ExecutionPreviewCard({
 						{preview.blockingReason}
 					</div>
 				) : null}
+				{executionState?.routeStatus === 'partial' && executionState.routeMessage ? (
+					<div className='rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900'>
+						{executionState.routeMessage}
+					</div>
+				) : null}
 				{executionState?.error ? (
 					<div className='rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-rose-900'>
-						{executionState.error}
+						{executionState.routeStatus === 'refunded' && executionState.routeMessage
+							? executionState.routeMessage
+							: executionState.error}
+					</div>
+				) : null}
+				{executionState?.status === 'tracking_route' && executionState.routeMessage ? (
+					<div className='rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sky-900'>
+						{executionState.routeMessage}
 					</div>
 				) : null}
 				{executionState?.preflight ? (
@@ -159,20 +194,25 @@ export default function ExecutionPreviewCard({
 				<Button
 					type='primary'
 					onClick={onExecute}
-					disabled={!preview.canExecute}
+					disabled={
+						!preview.canExecute ||
+						executionState?.status === 'tracking_route' ||
+						executionState?.status === 'confirmed'
+					}
 					loading={
 						executionState?.status === 'preflighting' ||
 						executionState?.status === 'awaiting_wallet_approval' ||
 						executionState?.status === 'approving' ||
 						executionState?.status === 'awaiting_wallet_execution' ||
 						executionState?.status === 'submitting' ||
-						executionState?.status === 'submitted'
+						executionState?.status === 'submitted' ||
+						executionState?.status === 'tracking_route'
 					}
 				>
 					Execute With Wallet
 				</Button>
 				{executionState ? (
-					<span>Status: {renderExecutionStatus(executionState.status, preview)}</span>
+					<span>Status: {renderExecutionStatus(executionState, preview)}</span>
 				) : null}
 			</div>
 
@@ -199,6 +239,19 @@ export default function ExecutionPreviewCard({
 					>
 						{preview.executionKind === 'cross_chain' ? 'Route tx' : 'Deposit tx'}:{' '}
 						{executionState.executionTxHash}
+					</a>
+				</div>
+			) : null}
+
+			{executionState?.routeReceivingTxHash && executionState.routeReceivingExplorerLink ? (
+				<div className='mt-2 text-xs'>
+					<a
+						href={executionState.routeReceivingExplorerLink}
+						target='_blank'
+						rel='noreferrer'
+						className='text-blue-700 underline'
+					>
+						Receiving tx: {executionState.routeReceivingTxHash}
 					</a>
 				</div>
 			) : null}
