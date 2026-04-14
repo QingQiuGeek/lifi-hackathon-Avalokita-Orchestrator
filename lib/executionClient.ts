@@ -8,6 +8,12 @@ import {
 } from './executionHelpers';
 import { normalizeExecutionError } from './executionErrors';
 import type { ExecutionPreview } from './executionRuntime';
+import { createLifiClient } from './lifiClient';
+import {
+	resolveLifiRouteStatus,
+	type LifiStatusResponse,
+	type LifiRouteStatus,
+} from './lifiStatus';
 import { wagmiConfig } from './wagmi.config';
 
 export type ClientExecutionState = {
@@ -20,12 +26,20 @@ export type ClientExecutionState = {
 		| 'awaiting_wallet_execution'
 		| 'submitting'
 		| 'submitted'
+		| 'tracking_route'
 		| 'confirmed'
 		| 'failed';
 	txHashes: string[];
 	explorerLinks: string[];
 	approvalTxHash?: string;
 	executionTxHash?: string;
+	routeStatus?: LifiRouteStatus;
+	routeSubstatus?: string;
+	routeMessage?: string;
+	routeReceivingChainId?: number;
+	routeReceivingTokenSymbol?: string;
+	routeReceivingTxHash?: string;
+	routeReceivingExplorerLink?: string;
 	errorCode?: string;
 	error?: string;
 	completedAt?: string;
@@ -41,6 +55,9 @@ type QuoteTransactionRequest = {
 };
 
 const RECEIPT_TIMEOUT_MS = 120_000;
+const ROUTE_STATUS_POLL_INTERVAL_MS = 10_000;
+const ROUTE_STATUS_TIMEOUT_MS = 300_000;
+const lifiClient = createLifiClient();
 
 function toExplorerLink(chainId: number, hash: string) {
 	return `${getExplorerTxBaseUrl(chainId)}${hash}`;
@@ -66,6 +83,147 @@ function requestFromPreview(preview: ExecutionPreview): QuoteTransactionRequest 
 	}
 
 	return preview.quote.transactionRequest ?? null;
+}
+
+function sleep(ms: number) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getRouteBridge(preview: ExecutionPreview): string | undefined {
+	if (preview.quote?.tool && preview.quote.tool !== 'composer') {
+		return preview.quote.tool;
+	}
+
+	return preview.quote?.includedSteps?.find(
+		(step) =>
+			step.tool &&
+			step.tool !== 'composer' &&
+			step.tool !== 'feeCollection',
+	)?.tool;
+}
+
+function buildRouteTrackingState(input: {
+	status: ClientExecutionState['status'];
+	chainId: number;
+	approvalTxHash?: string;
+	executionTxHash?: string;
+	preflight?: ExecutionPreflightResult;
+	routeStatus: LifiRouteStatus;
+	routeSubstatus: string | null;
+	routeMessage: string;
+	routeReceivingChainId: number | null;
+	routeReceivingTokenSymbol: string | null;
+	routeReceivingTxHash: string | null;
+	error?: string;
+	errorCode?: string;
+	completedAt?: string;
+}) {
+	const routeReceivingExplorerLink =
+		input.routeReceivingChainId != null && input.routeReceivingTxHash
+			? toExplorerLink(input.routeReceivingChainId, input.routeReceivingTxHash)
+			: undefined;
+
+	return {
+		status: input.status,
+		approvalTxHash: input.approvalTxHash,
+		executionTxHash: input.executionTxHash,
+		...toHashes({
+			approvalTxHash: input.approvalTxHash,
+			executionTxHash: input.executionTxHash,
+			chainId: input.chainId,
+		}),
+		preflight: input.preflight,
+		routeStatus: input.routeStatus,
+		routeSubstatus: input.routeSubstatus ?? undefined,
+		routeMessage: input.routeMessage,
+		routeReceivingChainId: input.routeReceivingChainId ?? undefined,
+		routeReceivingTokenSymbol: input.routeReceivingTokenSymbol ?? undefined,
+		routeReceivingTxHash: input.routeReceivingTxHash ?? undefined,
+		routeReceivingExplorerLink,
+		error: input.error,
+		errorCode: input.errorCode,
+		completedAt: input.completedAt,
+	} satisfies ClientExecutionState;
+}
+
+async function trackCrossChainRouteStatus(input: {
+	preview: ExecutionPreview;
+	chainId: number;
+	approvalTxHash?: Hex;
+	executionTxHash: Hex;
+	preflight?: ExecutionPreflightResult;
+	onStateChange: (state: ClientExecutionState) => void;
+}) {
+	const startedAt = Date.now();
+	const bridge = getRouteBridge(input.preview);
+	let lastRouteMessage =
+		'Source-chain route confirmed. Tracking final LI.FI route status.';
+
+	while (Date.now() - startedAt < ROUTE_STATUS_TIMEOUT_MS) {
+		const statusResult = await lifiClient.getStatus({
+			txHash: input.executionTxHash,
+			fromChain: input.preview.fromChain,
+			toChain: input.preview.toChain,
+			bridge,
+		});
+
+		if (statusResult.success) {
+			const resolved = resolveLifiRouteStatus(
+				statusResult.data as LifiStatusResponse,
+			);
+			lastRouteMessage = resolved.message;
+
+			input.onStateChange(
+				buildRouteTrackingState({
+					status: resolved.clientStatus,
+					chainId: input.chainId,
+					approvalTxHash: input.approvalTxHash,
+					executionTxHash: input.executionTxHash,
+					preflight: input.preflight,
+					routeStatus: resolved.routeStatus,
+					routeSubstatus: resolved.substatus,
+					routeMessage: resolved.message,
+					routeReceivingChainId: resolved.receivingChainId,
+					routeReceivingTokenSymbol: resolved.receivingTokenSymbol,
+					routeReceivingTxHash: resolved.receivingTxHash,
+					error:
+						resolved.clientStatus === 'failed' ? resolved.message : undefined,
+					errorCode:
+						resolved.routeStatus === 'refunded'
+							? 'route_refunded'
+							: resolved.clientStatus === 'failed'
+								? 'route_failed'
+								: undefined,
+					completedAt:
+						resolved.clientStatus === 'tracking_route'
+							? undefined
+							: new Date().toISOString(),
+				}),
+			);
+
+			if (resolved.clientStatus !== 'tracking_route') {
+				return;
+			}
+		}
+
+		await sleep(ROUTE_STATUS_POLL_INTERVAL_MS);
+	}
+
+	input.onStateChange(
+		buildRouteTrackingState({
+			status: 'tracking_route',
+			chainId: input.chainId,
+			approvalTxHash: input.approvalTxHash,
+			executionTxHash: input.executionTxHash,
+			preflight: input.preflight,
+			routeStatus: 'pending',
+			routeSubstatus: null,
+			routeMessage: `${lastRouteMessage} Final LI.FI route status is still pending.`,
+			routeReceivingChainId: null,
+			routeReceivingTokenSymbol: null,
+			routeReceivingTxHash: null,
+		}),
+	);
 }
 
 export async function executePreviewTransaction(input: {
@@ -278,6 +436,40 @@ export async function executePreviewTransaction(input: {
 			},
 		});
 		const succeeded = receipt.status === 'success';
+
+		if (succeeded && input.preview.executionKind === 'cross_chain') {
+			input.onStateChange(
+				buildRouteTrackingState({
+					status: 'tracking_route',
+					chainId,
+					approvalTxHash,
+					executionTxHash,
+					preflight,
+					routeStatus: 'pending',
+					routeSubstatus: null,
+					routeMessage:
+						'Source-chain route confirmed. Tracking final LI.FI route status.',
+					routeReceivingChainId: null,
+					routeReceivingTokenSymbol: null,
+					routeReceivingTxHash: null,
+				}),
+			);
+
+			await trackCrossChainRouteStatus({
+				preview: input.preview,
+				chainId,
+				approvalTxHash,
+				executionTxHash,
+				preflight,
+				onStateChange: input.onStateChange,
+			});
+
+			return {
+				hash: executionTxHash,
+				approvalTxHash,
+				receipt,
+			};
+		}
 
 		input.onStateChange({
 			status: succeeded ? 'confirmed' : 'failed',
