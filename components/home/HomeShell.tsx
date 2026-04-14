@@ -17,9 +17,9 @@ import {
 
 export const navItems = [
 	{ id: 'dashboard', icon: Wallet, label: 'Jewel-Holder' },
+	{ id: 'auto-agent', icon: Brain, label: 'Auto-Agent' },
 	{ id: 'analytics', icon: Eye, label: 'Wisdom-Eye' },
 	{ id: 'vaults', icon: Shield, label: 'Abhaya-Giver' },
-	{ id: 'agent', icon: Brain, label: 'Agent' },
 	{ id: 'router', icon: Route, label: 'Avatar-Router' },
 	{ id: 'refinery', icon: Droplet, label: 'Amrita-Refinery' },
 	{ id: 'executor', icon: Zap, label: 'Vajra-Executor' },
@@ -189,6 +189,12 @@ export default function HomeShell({
 							Dashboard
 						</button>
 						<button
+							onClick={() => onViewChange('auto-agent')}
+							className={`font-body uppercase text-xs tracking-widest py-1 transition-all ${currentView === 'auto-agent' ? 'text-emerald-700 dark:text-emerald-400 border-b-2 border-emerald-700' : 'text-stone-400 dark:text-stone-500 hover:text-emerald-600'}`}
+						>
+							Auto-Agent
+						</button>
+						<button
 							onClick={() => onViewChange('analytics')}
 							className={`font-body uppercase text-xs tracking-widest py-1 transition-all ${currentView === 'analytics' ? 'text-emerald-700 dark:text-emerald-400 border-b-2 border-emerald-700' : 'text-stone-400 dark:text-stone-500 hover:text-emerald-600'}`}
 						>
@@ -199,12 +205,6 @@ export default function HomeShell({
 							className={`font-body uppercase text-xs tracking-widest py-1 transition-all ${currentView === 'vaults' ? 'text-emerald-700 dark:text-emerald-400 border-b-2 border-emerald-700' : 'text-stone-400 dark:text-stone-500 hover:text-emerald-600'}`}
 						>
 							Vaults
-						</button>
-						<button
-							onClick={() => onViewChange('agent')}
-							className={`font-body uppercase text-xs tracking-widest py-1 transition-all ${currentView === 'agent' ? 'text-emerald-700 dark:text-emerald-400 border-b-2 border-emerald-700' : 'text-stone-400 dark:text-stone-500 hover:text-emerald-600'}`}
-						>
-							Agent
 						</button>
 					</nav>
 
