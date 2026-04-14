@@ -86,7 +86,9 @@ body {
 	font-family: var(--font-inter);
 	background-color: var(--app-bg);
 	color: var(--app-text);
-	overflow: hidden;
+	min-height: 100dvh;
+	overflow-x: hidden;
+	overflow-y: auto;
 }
 
 .glass-panel {

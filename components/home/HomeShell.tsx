@@ -96,7 +96,7 @@ export default function HomeShell({
 				/>
 			</motion.div>
 
-			<aside className='h-screen w-64 fixed left-0 top-0 bg-stone-100/80 dark:bg-stone-900/80 backdrop-blur-xl border-r border-accent-gold/10 shadow-2xl flex flex-col py-8 px-4 z-50'>
+			<aside className='h-screen w-64 fixed left-0 top-0 bg-stone-100/80 dark:bg-stone-900/80 backdrop-blur-xl border-r border-accent-gold/10 shadow-2xl flex flex-col py-8 px-4 z-50 overflow-y-auto'>
 				<div className='mb-10 px-2'>
 					<div className='flex items-center gap-3'>
 						<motion.div
@@ -239,7 +239,7 @@ export default function HomeShell({
 				</div>
 			</header>
 
-			<main className='pl-64 pt-16 min-h-screen z-10 relative'>{children}</main>
+			<main className='pl-64 pt-16 pb-16 min-h-screen z-10 relative'>{children}</main>
 		</div>
 	);
 }
