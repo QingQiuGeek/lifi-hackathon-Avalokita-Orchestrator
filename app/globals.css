@@ -1,4 +1,37 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400&family=Manrope:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import 'tailwindcss';
 @import '@heroui/styles/css';
+
+@theme {
+	--color-primary: #4c644e;
+	--color-primary-container: #8fa98f;
+	--color-secondary: #a67c00;
+	--color-secondary-fixed: #f7e382;
+	--color-surface: #fbf9f5;
+	--color-surface-container-lowest: #ffffff;
+	--color-surface-container-low: #f5f3ef;
+	--color-surface-container: #efeeea;
+	--color-surface-container-high: #eae8e4;
+	--color-on-surface: #1b1c1a;
+	--color-on-surface-variant: #434842;
+	--color-outline-variant: #c3c8bf;
+	--color-error: #ba1a1a;
+	--color-accent-gold: #d4af37;
+
+	--font-headline: 'Noto Serif', serif;
+	--font-body: 'Manrope', sans-serif;
+	--font-label: 'Plus Jakarta Sans', sans-serif;
+
+	/* Dark mode colors */
+	--color-surface-dark: #0f172a;
+	--color-surface-container-lowest-dark: #1a202c;
+	--color-surface-container-low-dark: #1e293b;
+	--color-surface-container-dark: #334155;
+	--color-surface-container-high-dark: #475569;
+	--color-on-surface-dark: #f1f5f9;
+	--color-on-surface-variant-dark: #cbd5e1;
+	--color-outline-variant-dark: #64748b;
+}
 
 /* 全局默认颜色 */
 :root {
@@ -54,6 +87,15 @@ body {
 	background-color: var(--app-bg);
 	color: var(--app-text);
 	overflow: hidden;
+}
+
+.glass-panel {
+	background: rgba(228, 226, 222, 0.6);
+	backdrop-filter: blur(12px);
+}
+
+.gold-glow {
+	box-shadow: 0 0 20px rgba(212, 175, 55, 0.2);
 }
 
 /* 兼容既有 Tailwind 字面量颜色类，确保亮色主题可读 */
