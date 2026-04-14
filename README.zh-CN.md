@@ -2,6 +2,8 @@
   <a href="./README.md">English</a> | 简体中文
 </p>
 
+![](.\app\logo.jpg)
+
 # Avalokita
 
 Avalokita 是一个面向 LI.FI `AI x Earn` 赛道打造的 AI Native DeFi Earn 产品。它把意图识别、基于 LI.FI 的实时路由能力，以及钱包确认执行，整合成一条统一的 Earn 工作流。

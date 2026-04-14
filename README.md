@@ -2,6 +2,8 @@
   English | <a href="./README.zh-CN.md">简体中文</a>
 </p>
 
+![](.\app\logo.jpg)
+
 # Avalokita
 
 Avalokita is an AI-native DeFi Earn experience built for the LI.FI `AI x Earn` track. It combines intent recognition, live LI.FI-powered routing, and wallet-confirmed execution into a single workflow for discovering and entering Earn opportunities.
