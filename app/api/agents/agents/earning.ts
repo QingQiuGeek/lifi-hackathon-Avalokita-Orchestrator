@@ -1,4 +1,4 @@
-import { generateText } from 'ai';
+import { streamText } from 'ai';
 import { getAgentConfig } from '@/lib/agentConfig';
 import { getModelFromConfig } from '@/lib/agentClient';
 import { createAgentStepEvent, type AgentStepEvent } from '@/lib/agentSteps';
@@ -189,26 +189,26 @@ async function resolveExecutableQuote(input: {
 	}
 
 	const candidates = [input.selectedVault, ...input.alternatives];
-	let lastError =
-		input.currentQuote?.success === false
-			? input.currentQuote.error
-			: 'Live LI.FI quote data is unavailable right now.';
-	let attempts = 0;
 
-	for (const candidate of candidates) {
-		attempts += 1;
-		const quoteResult = await buildDepositQuote({
-			sourceChainId: input.plan.sourceChain,
-			targetChainId: input.plan.targetChain,
-			amount: input.plan.amount,
-			fromAddress: input.userAddress,
-			targetVaultAddress: candidate.address,
-		});
+	// Fire all quote requests in parallel
+	const results = await Promise.allSettled(
+		candidates.map(async (candidate) => {
+			const quoteResult = await buildDepositQuote({
+				sourceChainId: input.plan.sourceChain,
+				targetChainId: input.plan.targetChain,
+				amount: input.plan.amount!,
+				fromAddress: input.userAddress,
+				targetVaultAddress: candidate.address,
+			});
+			return { candidate, quoteResult };
+		}),
+	);
 
-		if (!quoteResult.success) {
-			lastError = quoteResult.error;
-			continue;
-		}
+	// Iterate in original order to preserve candidate priority
+	for (const settled of results) {
+		if (settled.status !== 'fulfilled') continue;
+		const { candidate, quoteResult } = settled.value;
+		if (!quoteResult.success) continue;
 
 		const quote = {
 			action: quoteResult.quote.action,
@@ -222,16 +222,24 @@ async function resolveExecutableQuote(input: {
 
 		return {
 			selectedVault: candidate,
-			alternatives: candidates.filter((vault) => vault.address !== candidate.address),
+			alternatives: candidates.filter((v) => v.address !== candidate.address),
 			quote: {
 				success: true as const,
 				data: quote,
 				summary: buildQuoteSummary(quote),
 			},
-			attemptedCandidates: attempts,
+			attemptedCandidates: candidates.length,
 			recovered: candidate.address !== input.selectedVault.address,
 		};
 	}
+
+	// All failed — extract last error
+	const lastError = results
+		.filter(
+			(r): r is PromiseFulfilledResult<{ candidate: NormalizedVaultCandidate; quoteResult: { success: false; error: string } }> =>
+				r.status === 'fulfilled' && !r.value.quoteResult.success,
+		)
+		.pop()?.value.quoteResult.error ?? 'Live LI.FI quote data is unavailable right now.';
 
 	return {
 		selectedVault: input.selectedVault,
@@ -241,7 +249,7 @@ async function resolveExecutableQuote(input: {
 			error: lastError,
 			summary: `Failed to build LI.FI quote: ${lastError}`,
 		},
-		attemptedCandidates: attempts,
+		attemptedCandidates: candidates.length,
 		recovered: false,
 	};
 }
@@ -273,14 +281,6 @@ function buildFallbackResponse(input: {
 	return input.listVaults.summary;
 }
 
-function combineResponseSections(modelText: string, deterministicText: string): string {
-	const trimmedModelText = modelText.trim();
-	if (!trimmedModelText) {
-		return deterministicText;
-	}
-
-	return [`## Agent Summary`, trimmedModelText, deterministicText].join('\n\n');
-}
 
 export async function* earningAgentStream(
 	input: EarningAgentInput,
@@ -322,11 +322,10 @@ export async function* earningAgentStream(
 	});
 
 	let modelText = '';
-	let modelReasoning = '';
 
 	try {
 		const model = getModelFromConfig(getAgentConfig('earning'));
-		const result = await generateText({
+		const result = streamText({
 			model,
 			temperature: 0,
 			maxTokens: 900,
@@ -342,51 +341,82 @@ export async function* earningAgentStream(
 				'buildComposerQuote',
 			],
 		});
-		modelText = result.text;
-		modelReasoning = result.reasoning ?? '';
+
+		for await (const part of result.fullStream) {
+			switch (part.type) {
+				case 'text-delta':
+					modelText += part.textDelta;
+					yield { type: 'response' as const, content: part.textDelta };
+					break;
+				case 'reasoning':
+					yield { type: 'thinking' as const, content: part.textDelta };
+					break;
+				case 'tool-call':
+					for (const step of stepLog.splice(0)) {
+						yield step;
+					}
+					break;
+				case 'tool-result':
+					for (const step of stepLog.splice(0)) {
+						yield step;
+					}
+					break;
+				case 'error':
+					yield {
+						type: 'error' as const,
+						content:
+							part.error instanceof Error
+								? part.error.message
+								: 'Tool-driven earn planning failed.',
+					};
+					return;
+				default:
+					break;
+			}
+		}
 	} catch (error) {
 		yield {
-			type: 'error',
+			type: 'error' as const,
 			content:
 				error instanceof Error ? error.message : 'Tool-driven earn planning failed.',
 		};
 		return;
 	}
 
-	if (!runtimeState.listVaults) {
-		runtimeState.listVaults = await runListVaults(
-			{
-				chainId: input.plan.targetChain,
-				token: input.plan.asset,
-				minApy: input.plan.minApy ?? undefined,
-				limit: 3,
-			},
-			{
-				plan: input.plan,
-				userAddress: input.userAddress,
-			},
-		);
-	}
-
-	if (!runtimeState.portfolio) {
-		runtimeState.portfolio = await runGetPortfolio(
-			{
-				userAddress: input.userAddress,
-				chainId: input.plan.targetChain,
-			},
-			{
-				plan: input.plan,
-				userAddress: input.userAddress,
-			},
-		);
-	}
-
-	for (const step of stepLog) {
+	// Drain any remaining step events
+	for (const step of stepLog.splice(0)) {
 		yield step;
 	}
 
-	if (modelReasoning.trim()) {
-		yield { type: 'thinking', content: `${modelReasoning.trim()}\n` };
+	// Parallelize fallback calls for vault search and portfolio
+	const [fallbackVaults, fallbackPortfolio] = await Promise.all([
+		runtimeState.listVaults
+			? Promise.resolve(runtimeState.listVaults)
+			: runListVaults(
+					{
+						chainId: input.plan.targetChain,
+						token: input.plan.asset,
+						minApy: input.plan.minApy ?? undefined,
+						limit: 3,
+					},
+					{ plan: input.plan, userAddress: input.userAddress },
+				),
+		runtimeState.portfolio
+			? Promise.resolve(runtimeState.portfolio)
+			: runGetPortfolio(
+					{
+						userAddress: input.userAddress,
+						chainId: input.plan.targetChain,
+					},
+					{ plan: input.plan, userAddress: input.userAddress },
+				),
+	]);
+	runtimeState.listVaults = fallbackVaults;
+	runtimeState.portfolio = fallbackPortfolio;
+
+	// Drain step events from fallback calls
+	for (const step of stepLog.splice(0)) {
+		yield step;
 	}
 
 	const listVaults = runtimeState.listVaults;
@@ -488,6 +518,8 @@ export async function* earningAgentStream(
 
 	yield {
 		type: 'response',
-		content: combineResponseSections(modelText, deterministicText),
+		content: modelText.trim()
+			? `\n\n${deterministicText}`
+			: deterministicText,
 	};
 }

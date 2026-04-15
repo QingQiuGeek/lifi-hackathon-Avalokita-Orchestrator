@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400&family=Manrope:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Noto+Serif:ital,wght@0,400;0,700;1,400&family=Manrope:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
 @import 'tailwindcss';
 @import '@heroui/styles/css';
 
@@ -21,6 +21,7 @@
 	--font-headline: 'Noto Serif', serif;
 	--font-body: 'Manrope', sans-serif;
 	--font-label: 'Plus Jakarta Sans', sans-serif;
+	--font-art: 'Cinzel Decorative', serif;
 
 	/* Dark mode colors */
 	--color-surface-dark: #0f172a;

@@ -1,3 +1,5 @@
+'use client';
+
 import {
 	BulbOutlined,
 	CheckCircleOutlined,
@@ -5,6 +7,7 @@ import {
 } from '@ant-design/icons';
 import { Prompts } from '@ant-design/x';
 import type { PromptsProps } from '@ant-design/x';
+import { useEffect, useMemo, useState } from 'react';
 
 const promptItems: PromptsProps['items'] = [
 	{
@@ -34,11 +37,99 @@ interface PromptProps {
 	onItemClick?: (prompt: string) => void;
 }
 
+const TYPEWRITER_TEXT = 'Ask the Avalokita';
+
+function TypewriterTitle() {
+	const [displayText, setDisplayText] = useState('');
+	const [isDeleting, setIsDeleting] = useState(false);
+	const [reduceMotion, setReduceMotion] = useState(false);
+
+	useEffect(() => {
+		if (typeof window === 'undefined') {
+			return;
+		}
+
+		const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+		const onChange = () => setReduceMotion(media.matches);
+		onChange();
+		media.addEventListener('change', onChange);
+
+		return () => {
+			media.removeEventListener('change', onChange);
+		};
+	}, []);
+
+	useEffect(() => {
+		if (reduceMotion) {
+			setDisplayText(TYPEWRITER_TEXT);
+			return;
+		}
+
+		const reachedEnd =
+			!isDeleting && displayText.length === TYPEWRITER_TEXT.length;
+		const reachedStart = isDeleting && displayText.length === 0;
+
+		let timeout = isDeleting ? 70 : 120;
+		if (reachedEnd) {
+			timeout = 1200;
+		} else if (reachedStart) {
+			timeout = 280;
+		}
+
+		const timer = window.setTimeout(() => {
+			if (reachedEnd) {
+				setIsDeleting(true);
+				return;
+			}
+
+			if (reachedStart) {
+				setIsDeleting(false);
+				return;
+			}
+
+			setDisplayText((current) =>
+				isDeleting
+					? current.slice(0, -1)
+					: TYPEWRITER_TEXT.slice(0, current.length + 1),
+			);
+		}, timeout);
+
+		return () => {
+			window.clearTimeout(timer);
+		};
+	}, [displayText, isDeleting, reduceMotion]);
+
+	const titleText = useMemo(
+		() => (reduceMotion ? TYPEWRITER_TEXT : displayText),
+		[displayText, reduceMotion],
+	);
+
+	return (
+		<span
+			className='inline-flex items-center'
+			style={{
+				color: '#000000',
+				fontFamily: 'var(--font-art), var(--font-headline), serif',
+				fontWeight: 900,
+				fontSize: 'clamp(1.55rem, 1.9vw, 2.2rem)',
+				letterSpacing: '0.01em',
+			}}
+		>
+			{titleText}
+			<span
+				aria-hidden
+				className='ml-0.5 inline-block h-[1.15em] w-[2px] animate-pulse'
+				style={{ backgroundColor: '#000000' }}
+			/>
+		</span>
+	);
+}
+
 const Prompt = ({ onItemClick }: PromptProps) => (
 	<div className='flex items-center justify-center flex-1'>
 		<div className='w-full'>
 			<Prompts
-				title='Ask the LI.FI Agent:'
+				title={<TypewriterTitle />}
 				items={promptItems}
 				wrap
 				onItemClick={({ data }) => {
