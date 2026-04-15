@@ -1,5 +1,6 @@
 const EARN_API_BASE_URL = 'https://earn.li.fi/v1/earn';
 const LIFI_QUOTE_API_BASE_URL = 'https://li.quest/v1/quote';
+const LIFI_STATUS_API_BASE_URL = 'https://li.quest/v1/status';
 
 export type LifiClientSuccess<T> = {
 	success: true;
@@ -17,6 +18,33 @@ export type LifiClientFailure = {
 export type LifiClientResult<T> = LifiClientSuccess<T> | LifiClientFailure;
 
 type FetchLike = typeof fetch;
+type QueryParamValue =
+	| string
+	| number
+	| boolean
+	| Array<string | number | boolean>
+	| undefined
+	| null;
+
+function buildSearchParams(
+	params: Record<string, QueryParamValue>,
+): URLSearchParams {
+	const searchParams = new URLSearchParams();
+	for (const [key, value] of Object.entries(params)) {
+		if (Array.isArray(value)) {
+			for (const item of value) {
+				searchParams.append(key, String(item));
+			}
+			continue;
+		}
+
+		if (value !== undefined && value !== null) {
+			searchParams.set(key, String(value));
+		}
+	}
+
+	return searchParams;
+}
 
 function buildRequestHeaders(init?: RequestInit): HeadersInit | undefined {
 	const apiKey = process.env.LIFI_API_KEY?.trim();
@@ -84,14 +112,8 @@ async function requestJson<T>(
 
 export function createLifiClient(fetchImpl: FetchLike = fetch) {
 	return {
-		getVaults(params: Record<string, string | number | boolean | undefined>) {
-			const searchParams = new URLSearchParams();
-			for (const [key, value] of Object.entries(params)) {
-				if (value !== undefined && value !== null) {
-					searchParams.set(key, String(value));
-				}
-			}
-
+		getVaults(params: Record<string, QueryParamValue>) {
+			const searchParams = buildSearchParams(params);
 			return requestJson<{ data?: unknown; total?: unknown }>(
 				fetchImpl,
 				`${EARN_API_BASE_URL}/vaults?${searchParams.toString()}`,
@@ -115,17 +137,18 @@ export function createLifiClient(fetchImpl: FetchLike = fetch) {
 				`${EARN_API_BASE_URL}/portfolio/${input.userAddress}/positions`,
 			);
 		},
-		getQuote(params: Record<string, string | number | boolean | undefined>) {
-			const searchParams = new URLSearchParams();
-			for (const [key, value] of Object.entries(params)) {
-				if (value !== undefined && value !== null) {
-					searchParams.set(key, String(value));
-				}
-			}
-
+		getQuote(params: Record<string, QueryParamValue>) {
+			const searchParams = buildSearchParams(params);
 			return requestJson<Record<string, unknown>>(
 				fetchImpl,
 				`${LIFI_QUOTE_API_BASE_URL}?${searchParams.toString()}`,
+			);
+		},
+		getStatus(params: Record<string, QueryParamValue>) {
+			const searchParams = buildSearchParams(params);
+			return requestJson<Record<string, unknown>>(
+				fetchImpl,
+				`${LIFI_STATUS_API_BASE_URL}?${searchParams.toString()}`,
 			);
 		},
 	};

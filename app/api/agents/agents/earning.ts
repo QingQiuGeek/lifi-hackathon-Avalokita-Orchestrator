@@ -83,6 +83,8 @@ function buildEarnSystemPrompt(): string {
 		'For cross-chain Earn requests, search vaults on the target chain first and only then build the quote from the source chain into that target vault.',
 		`Only support cross-chain Earn into ${formatSupportedCrossChainEarnTargetsWithIds()}. Requests targeting other chains across chains must be treated as unsupported.`,
 		'Never describe a cross-chain route as fully completed on the destination chain. At most, the app confirms the source-chain route transaction.',
+		'When a LI.FI quote fails, report the exact tool error string as the primary fact.',
+		'Do not speculate about minimum amounts, route thresholds, or unsupported paths unless a tool result explicitly states that cause.',
 		'You may call estimateYield to explain projected returns.',
 		'Never invent vault names, APY, TVL, fee, or quote data.',
 		'Never claim a transaction has executed. Wallet confirmation and transaction submission happen outside of the model.',
@@ -191,8 +193,10 @@ async function resolveExecutableQuote(input: {
 		input.currentQuote?.success === false
 			? input.currentQuote.error
 			: 'Live LI.FI quote data is unavailable right now.';
+	let attempts = 0;
 
 	for (const candidate of candidates) {
+		attempts += 1;
 		const quoteResult = await buildDepositQuote({
 			sourceChainId: input.plan.sourceChain,
 			targetChainId: input.plan.targetChain,
@@ -224,7 +228,7 @@ async function resolveExecutableQuote(input: {
 				data: quote,
 				summary: buildQuoteSummary(quote),
 			},
-			attemptedCandidates: candidates.length,
+			attemptedCandidates: attempts,
 			recovered: candidate.address !== input.selectedVault.address,
 		};
 	}
@@ -237,7 +241,7 @@ async function resolveExecutableQuote(input: {
 			error: lastError,
 			summary: `Failed to build LI.FI quote: ${lastError}`,
 		},
-		attemptedCandidates: candidates.length,
+		attemptedCandidates: attempts,
 		recovered: false,
 	};
 }
@@ -442,6 +446,8 @@ export async function* earningAgentStream(
 			dataSource: selectedVault.dataSource,
 		},
 		quote: toExecutionQuote(runtimeState.quote),
+		quoteFailureReason:
+			runtimeState.quote?.success === false ? runtimeState.quote.error : undefined,
 	});
 
 	yield {
@@ -474,6 +480,10 @@ export async function* earningAgentStream(
 		plan: input.plan,
 		executionPreview,
 		thresholdSatisfied: listVaults.data.thresholdSatisfied,
+		selectionNote:
+			quoteResolution.recovered
+				? 'Higher-ranked Polygon vault candidates were skipped because they did not produce an executable Base -> Polygon quote for this request.'
+				: undefined,
 	});
 
 	yield {
