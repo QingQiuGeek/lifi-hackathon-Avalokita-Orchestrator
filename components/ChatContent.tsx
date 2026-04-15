@@ -99,6 +99,31 @@ function toHistoryMessages(messages: ChatMessage[]) {
 		}));
 }
 
+function formatReasoningText(text: string): string {
+	const trimmed = text.trim();
+	if (!trimmed) {
+		return text;
+	}
+
+	const startIndex = trimmed.indexOf('{');
+	const endIndex = trimmed.lastIndexOf('}');
+	if (startIndex < 0 || endIndex <= startIndex) {
+		return text;
+	}
+
+	const prefix = trimmed.slice(0, startIndex).trimEnd();
+	const jsonText = trimmed.slice(startIndex, endIndex + 1);
+	const suffix = trimmed.slice(endIndex + 1).trimStart();
+
+	try {
+		const parsed = JSON.parse(jsonText) as unknown;
+		const prettyJson = JSON.stringify(parsed, null, 2);
+		return [prefix, prettyJson, suffix].filter(Boolean).join('\n');
+	} catch {
+		return text;
+	}
+}
+
 export default function ChatContent() {
 	const { address: userAddress } = useAccount();
 	const walletChainId = useChainId();
@@ -319,7 +344,9 @@ export default function ChatContent() {
 	}, [clearAllTimers]);
 
 	useEffect(() => {
-		hasUserMessageRef.current = messages.some((message) => message.role === 'user');
+		hasUserMessageRef.current = messages.some(
+			(message) => message.role === 'user',
+		);
 	}, [messages]);
 
 	useEffect(() => {
@@ -688,7 +715,9 @@ export default function ChatContent() {
 	const createAiActions = useCallback(
 		(data: BubbleItemType): ActionsProps['items'] => {
 			const aiKey = String(data.key);
-			const text = String((data.extraInfo as ChatMessage | undefined)?.content ?? '');
+			const text = String(
+				(data.extraInfo as ChatMessage | undefined)?.content ?? '',
+			);
 
 			return [
 				{
@@ -755,16 +784,14 @@ export default function ChatContent() {
 							style={{ marginBottom: 8 }}
 						>
 							{reasoningText ? (
-								<div className='whitespace-pre-wrap text-xs leading-5'>
-									{reasoningText}
+								<div className='min-w-0 max-w-full whitespace-pre-wrap break-words text-xs leading-5 [overflow-wrap:anywhere] [word-break:break-word]'>
+									{formatReasoningText(reasoningText)}
 								</div>
 							) : undefined}
 						</Think>
 					) : undefined,
 					footer:
-						isAiMessage &&
-						String(message?.content ?? '') &&
-						!isStreaming ? (
+						isAiMessage && String(message?.content ?? '') && !isStreaming ? (
 							<Actions
 								items={createAiActions(data)}
 								variant='borderless'

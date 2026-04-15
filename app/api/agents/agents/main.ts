@@ -1,4 +1,4 @@
-import { generateText } from 'ai';
+import { streamText } from 'ai';
 import { getAgentConfig } from '@/lib/agentConfig';
 import { getModelFromConfig } from '@/lib/agentClient';
 import {
@@ -38,7 +38,9 @@ export type MainAgentStreamChunk =
 			chainId: number;
 	  };
 
-async function planRequest(input: MainAgentInput): Promise<PlannerOutput> {
+async function* streamPlannerText(
+	input: MainAgentInput,
+): AsyncGenerator<string, string> {
 	const fallback = buildPlannerFallback({
 		message: input.userMessage,
 		walletChainId: input.walletChainId,
@@ -47,10 +49,10 @@ async function planRequest(input: MainAgentInput): Promise<PlannerOutput> {
 	try {
 		const config = getAgentConfig('main');
 		const model = getModelFromConfig(config);
-		const result = await generateText({
+		const result = streamText({
 			model,
 			temperature: 0,
-			maxTokens: 400,
+			maxTokens: 220,
 			system: [
 				'You are the planner for a DeFi earn application.',
 				'Return JSON only.',
@@ -64,9 +66,15 @@ async function planRequest(input: MainAgentInput): Promise<PlannerOutput> {
 			prompt: buildPlannerPrompt(input),
 		});
 
-		return extractPlannerPayload(result.text, input.walletChainId);
+		let text = '';
+		for await (const delta of result.textStream) {
+			text += delta;
+			yield delta;
+		}
+
+		return text;
 	} catch {
-		return fallback;
+		return JSON.stringify(fallback);
 	}
 }
 
@@ -95,12 +103,68 @@ function unknownIntentMessage(): string {
 	].join('\n\n');
 }
 
+function buildUnknownIntentPrompt(input: MainAgentInput): string {
+	const history = input.messages
+		.slice(-6)
+		.map((message) => `${message.role}: ${message.content}`)
+		.join('\n');
+
+	return [
+		`User wallet: ${input.userAddress}`,
+		`Wallet chain: ${input.walletChainId}`,
+		`Current message: ${input.userMessage}`,
+		history ? `Recent messages:\n${history}` : '',
+	]
+		.filter(Boolean)
+		.join('\n\n');
+}
+
+async function* unknownIntentMessageFromModel(
+	input: MainAgentInput,
+): AsyncGenerator<string> {
+	try {
+		const model = getModelFromConfig(getAgentConfig('main'));
+		const result = streamText({
+			model,
+			temperature: 0,
+			maxTokens: 800,
+			system: [
+				'You are Avalokita, the LI.FI AI Earn agent for a USDC-focused DeFi assistant.',
+				'You can call tools to gather facts when needed, but do not fabricate tool output.',
+				'The current product scope is Earn only.',
+				`Supported chains: ${formatSupportedBusinessChainsWithIds()}.`,
+				'Supported asset in this demo: USDC.',
+				'If the request is out of scope, politely explain scope and provide 1-2 valid Earn examples.',
+			].join('\n'),
+			prompt: buildUnknownIntentPrompt(input),
+		});
+
+		for await (const delta of result.textStream) {
+			yield delta;
+		}
+	} catch {
+		return;
+	}
+}
+
 export async function* mainAgentStream(
 	input: MainAgentInput,
 ): AsyncGenerator<MainAgentStreamChunk> {
-	yield { type: 'thinking', content: 'Planning request...\n' };
+	yield { type: 'thinking', content: 'Planning request, please wait...\n' };
 
-	const plan = await planRequest(input);
+	let plannerText = '';
+	const plannerStream = streamPlannerText(input);
+	while (true) {
+		const next = await plannerStream.next();
+		if (next.done) {
+			plannerText = next.value;
+			break;
+		}
+
+		yield { type: 'thinking', content: next.value };
+	}
+
+	const plan = extractPlannerPayload(plannerText, input.walletChainId);
 	const detected = detectIntentFromMessage(input.userMessage);
 	const effectiveIntent =
 		plan.intent === 'unknown' && detected.intent !== 'unknown'
@@ -126,7 +190,10 @@ export async function* mainAgentStream(
 	}
 
 	if (effectiveIntent === 'bridge' || effectiveIntent === 'monitor') {
-		yield { type: 'response', content: unsupportedIntentMessage(effectiveIntent) };
+		yield {
+			type: 'response',
+			content: unsupportedIntentMessage(effectiveIntent),
+		};
 		yield {
 			type: 'done',
 			intent: effectiveIntent,
@@ -151,7 +218,15 @@ export async function* mainAgentStream(
 		return;
 	}
 
-	yield { type: 'response', content: unknownIntentMessage() };
+	let emittedUnknownResponse = false;
+	for await (const delta of unknownIntentMessageFromModel(input)) {
+		emittedUnknownResponse = true;
+		yield { type: 'response', content: delta };
+	}
+
+	if (!emittedUnknownResponse) {
+		yield { type: 'response', content: unknownIntentMessage() };
+	}
 	yield {
 		type: 'done',
 		intent: 'unknown',
